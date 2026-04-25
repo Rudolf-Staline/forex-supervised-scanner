@@ -1,0 +1,56 @@
+# Python / local environments
+**/.venv/
+**/venv/
+**/env/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Test/type/lint caches
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.cache/
+
+# Streamlit / local app state
+**/.streamlit/
+
+# Local databases and runtime state
+apps/forex-scanner/data/
+**/data/*.db
+**/data/*.sqlite
+**/data/*.sqlite3
+*.db
+*.sqlite
+*.sqlite3
+apps/forex-scanner/config/settings.json
+
+# Secrets and local env
+.env
+.env.*
+!.env.example
+
+# Logs, temporary files, generated reports/evidence
+*.log
+*.tmp
+*.bak
+**/reports/
+**/exports/
+**/archives/
+**/backups/
+**/tmp/
+**/temp/
+
+# Node/build artifacts
+**/node_modules/
+**/dist/
+**/build/
+**/coverage/
+**/playwright-report/
+**/test-results/
+**/.vite/
+*.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db

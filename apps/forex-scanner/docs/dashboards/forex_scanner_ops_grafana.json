@@ -1,0 +1,359 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "forex_scanner_broker_connected",
+          "legendFormat": "{{broker_adapter}} {{execution_mode}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Broker Connectivity",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "forex_scanner_account_sync_fresh",
+          "legendFormat": "account",
+          "refId": "A"
+        },
+        {
+          "expr": "forex_scanner_position_sync_fresh",
+          "legendFormat": "positions",
+          "refId": "B"
+        },
+        {
+          "expr": "forex_scanner_reconciliation_fresh",
+          "legendFormat": "reconciliation",
+          "refId": "C"
+        }
+      ],
+      "title": "Sync Freshness",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "sum by (severity, category) (forex_scanner_reconciliation_anomalies_active)",
+          "legendFormat": "{{severity}} {{category}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Reconciliation Anomalies",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "sum by (severity, category) (forex_scanner_operational_alerts_active)",
+          "legendFormat": "{{severity}} {{category}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Active Alerts",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 4
+      },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "sum by (severity, category) (forex_scanner_operational_incidents_active)",
+          "legendFormat": "{{severity}} {{category}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Active Incidents",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 4
+      },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "increase(forex_scanner_broker_rejects_total[1h])",
+          "legendFormat": "rejects",
+          "refId": "A"
+        },
+        {
+          "expr": "increase(forex_scanner_broker_retries_exhausted_total[1h])",
+          "legendFormat": "retry exhausted",
+          "refId": "B"
+        }
+      ],
+      "title": "Reject / Retry Trend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 4
+      },
+      "id": 7,
+      "targets": [
+        {
+          "expr": "increase(forex_scanner_live_guardrail_triggers_total[1h])",
+          "legendFormat": "guardrails",
+          "refId": "A"
+        }
+      ],
+      "title": "Guardrail Triggers",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 4
+      },
+      "id": 8,
+      "targets": [
+        {
+          "expr": "forex_scanner_kill_switch_active",
+          "legendFormat": "kill switch",
+          "refId": "A"
+        },
+        {
+          "expr": "forex_scanner_operator_degraded_mode",
+          "legendFormat": "operator degraded",
+          "refId": "B"
+        },
+        {
+          "expr": "forex_scanner_broker_health_degraded",
+          "legendFormat": "broker degraded",
+          "refId": "C"
+        }
+      ],
+      "title": "Safety State",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "id": 9,
+      "targets": [
+        {
+          "expr": "increase(forex_scanner_live_submission_attempts_total[1h])",
+          "legendFormat": "attempts",
+          "refId": "A"
+        },
+        {
+          "expr": "increase(forex_scanner_live_submission_failures_total[1h])",
+          "legendFormat": "failures",
+          "refId": "B"
+        }
+      ],
+      "title": "Live Submission Attempts / Failures",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "id": 10,
+      "targets": [
+        {
+          "expr": "increase(forex_scanner_recovery_actions_total[1h])",
+          "legendFormat": "recovery actions",
+          "refId": "A"
+        }
+      ],
+      "title": "Recovery / Restart Activity",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "id": 11,
+      "targets": [
+        {
+          "expr": "forex_scanner_metric_export_info",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Exporter Health",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "id": 12,
+      "targets": [
+        {
+          "expr": "forex_scanner_broker_connected and forex_scanner_reconciliation_fresh and forex_scanner_account_sync_fresh",
+          "legendFormat": "soak readiness proxy",
+          "refId": "A"
+        }
+      ],
+      "title": "Soak Reliability Proxy",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "forex-scanner",
+    "supervised-trading",
+    "operations"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Forex Scanner Supervised Operations",
+  "uid": "forex-scanner-ops",
+  "version": 1,
+  "weekStart": ""
+}

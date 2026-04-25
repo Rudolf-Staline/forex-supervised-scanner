@@ -1,0 +1,43 @@
+"""Tamper-evident audit integrity helpers."""
+
+from .integrity import (
+    AUDIT_CHAIN_NAME,
+    AuditExportPackage,
+    AuditIntegrityIssue,
+    AuditIntegrityIssueType,
+    AuditIntegrityRecord,
+    AuditProtectedRecordType,
+    AuditSeal,
+    AuditSealTrigger,
+    AuditSourceRecordSnapshot,
+    AuditVerificationRun,
+    AuditVerificationStatus,
+    build_audit_integrity_record,
+    build_audit_seal,
+    canonicalize_payload_json,
+    compute_payload_hash,
+    compute_seal_hash,
+    effective_verification_status,
+    verify_integrity_records,
+)
+
+__all__ = [
+    "AUDIT_CHAIN_NAME",
+    "AuditExportPackage",
+    "AuditIntegrityIssue",
+    "AuditIntegrityIssueType",
+    "AuditIntegrityRecord",
+    "AuditProtectedRecordType",
+    "AuditSeal",
+    "AuditSealTrigger",
+    "AuditSourceRecordSnapshot",
+    "AuditVerificationRun",
+    "AuditVerificationStatus",
+    "build_audit_integrity_record",
+    "build_audit_seal",
+    "canonicalize_payload_json",
+    "compute_payload_hash",
+    "compute_seal_hash",
+    "effective_verification_status",
+    "verify_integrity_records",
+]

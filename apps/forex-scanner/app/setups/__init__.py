@@ -1,0 +1,2 @@
+"""Rules-based setup detection."""
+
