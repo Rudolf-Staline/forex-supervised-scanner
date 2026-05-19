@@ -17,6 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.config.safety import DemoSafetyError, ensure_demo_safe_mode
 from app.config.settings import load_settings
 from app.backup.recovery import load_recovery_state
 from app.core.pipeline import ScannerService
@@ -53,6 +54,10 @@ def main() -> None:
     settings.execution.mode = args.mode
     if args.provider:
         settings.broker.provider = args.provider
+    try:
+        ensure_demo_safe_mode(settings, context="broker_submit.py")
+    except DemoSafetyError as exc:
+        raise SystemExit(str(exc))
     if args.mode == "broker_live" and not args.allow_live:
         raise SystemExit("broker_live submission requires --allow-live plus config/env confirmation")
     if args.mode == "broker_live" and settings.broker.provider == "mock":

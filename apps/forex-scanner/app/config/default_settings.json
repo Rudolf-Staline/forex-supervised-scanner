@@ -160,6 +160,30 @@
     "broker_sandbox_enabled": true,
     "broker_live_enabled": false
   },
+  "safety": {
+    "execution_mode": "paper",
+    "allow_live_trading": false,
+    "broker_mode": "paper",
+    "auto_bot_enabled": false,
+    "require_environment_lock": true,
+    "execution_mode_env": "EXECUTION_MODE",
+    "allow_live_trading_env": "ALLOW_LIVE_TRADING",
+    "broker_mode_env": "BROKER_MODE",
+    "auto_bot_enabled_env": "AUTO_BOT_ENABLED"
+  },
+  "demo_bot": {
+    "auto_bot_enabled": false,
+    "interval_seconds": 300,
+    "min_score": 75.0,
+    "allowed_statuses": [
+      "approved",
+      "premium"
+    ],
+    "max_open_trades": 3,
+    "max_trades_per_day": 5,
+    "cooldown_minutes": 30.0,
+    "min_rr": 1.5
+  },
   "broker": {
     "provider": "mt5",
     "sandbox_enabled": true,

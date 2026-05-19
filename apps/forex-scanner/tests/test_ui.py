@@ -18,11 +18,12 @@ from app.core.types import (
     SetupFamily,
     SetupSubtype,
     Timeframe,
+    TradeRecord,
     TradingStyle,
 )
 from app.indicators.calculations import add_indicators
 from app.indicators.levels import LevelSet
-from app.ui.streamlit_app import _build_chart, _fmt_price, _gate_table, _opportunity_label, _opportunity_table
+from app.ui.streamlit_app import _backtest_equity_frame, _backtest_family_performance, _backtest_trade_table, _build_chart, _filter_backtest_trades, _fmt_price, _gate_table, _opportunity_label, _opportunity_table
 from tests.conftest import make_ohlcv
 
 
@@ -90,6 +91,7 @@ def _opportunity(direction: DirectionBias = DirectionBias.LONG) -> Opportunity:
 
 def test_opportunity_table_includes_no_trade_reason() -> None:
     table = _opportunity_table([_opportunity(DirectionBias.NO_TRADE)])
+    assert table.loc[0, "status_badge"] == "[WATCHLIST]"
     assert table.loc[0, "status"] == "watchlist"
     assert table.loc[0, "direction"] == "no-trade"
     assert table.loc[0, "no_trade_reason"] == "mixed evidence"
@@ -134,3 +136,39 @@ def test_build_chart_contains_indicators_and_annotated_levels() -> None:
 def test_format_price_handles_optional_values() -> None:
     assert _fmt_price(None) == "n/a"
     assert _fmt_price(1.234567) == "1.23457"
+
+
+def test_backtest_display_helpers_filter_and_summarize() -> None:
+    trades = [_trade(1.2, 80.0, SetupFamily.TREND_CONTINUATION), _trade(-0.8, 55.0, SetupFamily.BREAKOUT_CONFIRMATION)]
+
+    filtered = _filter_backtest_trades(trades, 70.0)
+    equity = _backtest_equity_frame(filtered, trades[0].entry_time, 10_000.0, 1.0)
+    families = _backtest_family_performance(trades)
+    table = _backtest_trade_table(trades)
+
+    assert filtered == [trades[0]]
+    assert equity["equity"].iloc[-1] == 10120.0
+    assert families.iloc[0]["setup_family"] == "trend_continuation"
+    assert {"symbol", "net_r", "final_score", "outcome"}.issubset(table.columns)
+
+
+def _trade(net_r: float, final_score: float, family: SetupFamily) -> TradeRecord:
+    now = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    return TradeRecord(
+        symbol="EUR/USD",
+        style=TradingStyle.DAY_TRADING,
+        setup_family=family,
+        setup_subtype=SetupSubtype.SHALLOW_EMA20_PULLBACK,
+        direction=DirectionBias.LONG,
+        entry_time=now,
+        exit_time=now,
+        entry=1.1,
+        stop_loss=1.095,
+        take_profit=1.11,
+        exit_price=1.11 if net_r > 0 else 1.095,
+        gross_r=net_r,
+        net_r=net_r,
+        exit_reason="take_profit" if net_r > 0 else "stop_loss",
+        cost_pips=1.0,
+        final_score=final_score,
+    )

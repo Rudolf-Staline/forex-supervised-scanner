@@ -23,8 +23,9 @@ from app.execution.models import CloseReason, ExecutionOrder, OrderRequest, Orde
 from app.execution.paper import PaperExecutor
 from app.execution.validation import PreTradeValidator
 from app.paper.reporting import generate_paper_portfolio_report
-from app.paper.trading import PaperTradingService
+from app.paper.trading import PaperTradingService, close_paper_order_manually, submit_signal_to_paper
 from app.risk.guardrails import PortfolioGuardrails
+from app.storage.database import Database
 
 
 def _request() -> OrderRequest:
@@ -222,6 +223,40 @@ def test_paper_trading_service_submits_only_guardrail_approved_opportunities(set
     assert result.orders[0].request.symbol == "EUR/USD"
     assert result.orders[0].request.source_status == "approved"
     assert result.orders[0].request.entry_rationale == "paper test"
+
+
+def test_submit_signal_to_paper_persists_source_notes_and_audit_event(settings, tmp_path) -> None:
+    database = Database(tmp_path / "paper.sqlite")
+
+    submission = submit_signal_to_paper(_opportunity(), settings=settings, database=database, source="manual", notes="demo note")
+
+    assert submission.created
+    assert submission.order is not None
+    assert submission.order.execution_assumptions["source"] == "manual"
+    assert submission.order.execution_assumptions["notes"] == "demo note"
+    persisted = database.load_paper_orders()[0]
+    assert persisted.request.entry_price == 1.1000
+    assert persisted.request.stop_loss == 1.0950
+    assert persisted.request.tp1 == 1.1050
+    assert persisted.request.tp2 == 1.1100
+    assert persisted.request.tp3 == 1.1150
+    assert persisted.status == OrderStatus.PENDING_OPPORTUNITY
+    assert any(event.event_type == TradeEventType.PAPER_SIGNAL_SUBMITTED for event in database.load_trade_events(persisted.order_id))
+
+
+def test_close_paper_order_manually_persists_notes_and_close_event(settings, tmp_path) -> None:
+    database = Database(tmp_path / "paper.sqlite")
+    submission = submit_signal_to_paper(_opportunity(), settings=settings, database=database, source="manual")
+    assert submission.order is not None
+
+    closed = close_paper_order_manually(submission.order, settings=settings, database=database, exit_price=1.1010, notes="manual exit")
+
+    assert closed.status == OrderStatus.FULLY_CLOSED
+    assert closed.close_reason == CloseReason.MANUAL
+    assert closed.execution_assumptions["manual_close_notes"] == "manual exit"
+    events = database.load_trade_events(closed.order_id)
+    assert any(event.event_type == TradeEventType.TRADE_CLOSED for event in events)
+    assert database.load_journal_entries()[0].status == OrderStatus.FULLY_CLOSED.value
 
 
 def test_portfolio_guardrails_block_bad_data_spread_and_exposure(settings) -> None:

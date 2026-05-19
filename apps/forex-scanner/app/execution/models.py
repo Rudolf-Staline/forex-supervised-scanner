@@ -48,6 +48,8 @@ class TradeEventType(str, Enum):
     SIGNAL_WATCHLISTED = "signal_watchlisted"
     SIGNAL_APPROVED = "signal_approved"
     SIGNAL_PREMIUM = "signal_premium"
+    PAPER_SIGNAL_SUBMITTED = "paper_signal_submitted"
+    JOURNAL_UPDATED = "journal_updated"
     TRADE_ACTIVATED = "trade_activated"
     TRADE_BLOCKED = "trade_blocked"
     TRADE_CANCELLED = "trade_cancelled"
@@ -86,6 +88,12 @@ class TradeEventType(str, Enum):
     RECONCILIATION_MISMATCH = "reconciliation_mismatch"
     LIVE_GUARDRAIL_TRIGGERED = "live_guardrail_triggered"
     OPERATOR_OVERRIDE = "operator_override"
+    DEMO_BOT_STARTED = "demo_bot_started"
+    DEMO_BOT_STOPPED = "demo_bot_stopped"
+    DEMO_BOT_CYCLE_STARTED = "demo_bot_cycle_started"
+    DEMO_BOT_DECISION_ACCEPTED = "demo_bot_decision_accepted"
+    DEMO_BOT_DECISION_REJECTED = "demo_bot_decision_rejected"
+    DEMO_BOT_CYCLE_COMPLETED = "demo_bot_cycle_completed"
 
 
 class BrokerOrderState(str, Enum):

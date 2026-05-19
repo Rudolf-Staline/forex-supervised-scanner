@@ -177,6 +177,53 @@ class ExecutionCapabilitySettings(BaseModel):
     broker_live_enabled: bool = False
 
 
+class SafetySettings(BaseModel):
+    """Central demo/paper safety lock for the local MVP."""
+
+    execution_mode: Literal["paper", "disabled", "broker_sandbox", "broker_live"] = "paper"
+    allow_live_trading: bool = False
+    broker_mode: Literal["paper", "broker_sandbox", "broker_live"] = "paper"
+    auto_bot_enabled: bool = False
+    require_environment_lock: bool = True
+    execution_mode_env: str = "EXECUTION_MODE"
+    allow_live_trading_env: str = "ALLOW_LIVE_TRADING"
+    broker_mode_env: str = "BROKER_MODE"
+    auto_bot_enabled_env: str = "AUTO_BOT_ENABLED"
+
+    @model_validator(mode="after")
+    def ensure_env_names(self) -> "SafetySettings":
+        env_names = [
+            self.execution_mode_env,
+            self.allow_live_trading_env,
+            self.broker_mode_env,
+            self.auto_bot_enabled_env,
+        ]
+        if any(not name.strip() for name in env_names):
+            raise ValueError("safety environment variable names cannot be empty")
+        if len(set(env_names)) != len(env_names):
+            raise ValueError("safety environment variable names must be unique")
+        return self
+
+
+class DemoBotSettings(BaseModel):
+    """Paper-only demo bot defaults; never enables live or broker execution."""
+
+    auto_bot_enabled: bool = False
+    interval_seconds: int = Field(default=300, ge=5, le=86400)
+    min_score: float = Field(default=75.0, ge=0.0, le=100.0)
+    allowed_statuses: list[Literal["approved", "premium"]] = Field(default_factory=lambda: ["approved", "premium"])
+    max_open_trades: int = Field(default=3, ge=1, le=100)
+    max_trades_per_day: int = Field(default=5, ge=1, le=1000)
+    cooldown_minutes: float = Field(default=30.0, ge=0.0, le=10080.0)
+    min_rr: float = Field(default=1.5, ge=0.0, le=20.0)
+
+    @model_validator(mode="after")
+    def ensure_statuses(self) -> "DemoBotSettings":
+        if not self.allowed_statuses:
+            raise ValueError("demo bot allowed_statuses cannot be empty")
+        return self
+
+
 class PortfolioRiskSettings(BaseModel):
     """Optional portfolio/session guardrails applied before paper execution."""
 
@@ -709,6 +756,8 @@ class AppSettings(BaseModel):
     approval: ApprovalSettings = Field(default_factory=ApprovalSettings)
     execution: ExecutionSettings = Field(default_factory=ExecutionSettings)
     execution_capabilities: ExecutionCapabilitySettings = Field(default_factory=ExecutionCapabilitySettings)
+    safety: SafetySettings = Field(default_factory=SafetySettings)
+    demo_bot: DemoBotSettings = Field(default_factory=DemoBotSettings)
     portfolio_risk: PortfolioRiskSettings = Field(default_factory=PortfolioRiskSettings)
     pre_live_validation: PreLiveValidationSettings = Field(default_factory=PreLiveValidationSettings)
     broker: BrokerSettings = Field(default_factory=BrokerSettings)

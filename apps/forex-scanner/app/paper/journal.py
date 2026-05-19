@@ -3,15 +3,27 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 from pydantic import BaseModel, Field
 
-from app.execution.models import ExecutionOrder, PaperBlockRecord, TradeEvent
+from app.execution.models import ExecutionOrder, PaperBlockRecord, TradeEvent, TradeEventType
 
 JournalScalar = str | float | int | bool | None
+
+LEARNING_TAGS = [
+    "entrée trop tôt",
+    "mauvais contexte",
+    "stop mal placé",
+    "bon setup",
+    "signal faible",
+    "non-respect du plan",
+    "trade impulsif",
+    "bonne patience",
+]
 
 
 class TradeJournalEntry(BaseModel):
@@ -20,6 +32,16 @@ class TradeJournalEntry(BaseModel):
     signal_id: str
     trade_id: str
     symbol: str
+    direction: str | None = None
+    source: str | None = None
+    result: str = "open"
+    pnl_r: float | None = None
+    mistake_tags: list[str] = Field(default_factory=list)
+    lesson: str | None = None
+    emotion: str | None = None
+    notes: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     setup_family: str
     setup_subtype: str
     style: str | None = None
@@ -127,6 +149,16 @@ def _entry_from_order(order: ExecutionOrder) -> TradeJournalEntry:
         signal_id=order.request.source_opportunity_id or order.order_id,
         trade_id=order.order_id,
         symbol=order.request.symbol,
+        direction=order.request.direction.value,
+        source=_source_from_mapping(order.execution_assumptions),
+        result=_result_from_order(order),
+        pnl_r=order.realized_r,
+        mistake_tags=_tags_from_mapping(order.execution_assumptions),
+        lesson=_text_from_mapping(order.execution_assumptions, "lesson"),
+        emotion=_text_from_mapping(order.execution_assumptions, "emotion"),
+        notes=_text_from_mapping(order.execution_assumptions, "notes"),
+        created_at=order.created_at,
+        updated_at=_updated_at_from_mapping(order.execution_assumptions) or order.closed_at or order.created_at,
         setup_family=order.request.setup_family.value,
         setup_subtype=order.request.setup_subtype.value,
         style=order.request.style.value,
@@ -188,6 +220,13 @@ def _entry_from_block(block: PaperBlockRecord) -> TradeJournalEntry:
         signal_id=block.block_id,
         trade_id=block.block_id,
         symbol=block.symbol,
+        direction=block.direction,
+        source=_source_from_mapping(block.portfolio_snapshot),
+        result="open",
+        pnl_r=None,
+        mistake_tags=[],
+        created_at=block.created_at,
+        updated_at=block.created_at,
         setup_family=block.setup_family,
         setup_subtype=block.setup_subtype,
         signal_timestamp=block.created_at,
@@ -217,6 +256,116 @@ def _journal_frame(entries: list[TradeJournalEntry]) -> pd.DataFrame:
             payload[key] = json.dumps(payload[key], sort_keys=True)
         rows.append(payload)
     return pd.DataFrame(rows)
+
+
+def apply_learning_review(
+    order: ExecutionOrder,
+    *,
+    mistake_tags: list[str] | None = None,
+    lesson: str | None = None,
+    emotion: str | None = None,
+    notes: str | None = None,
+    updated_at: datetime | None = None,
+) -> ExecutionOrder:
+    """Attach operator learning fields to a paper order and append an audit event."""
+
+    timestamp = updated_at or datetime.now(timezone.utc)
+    tags = _normalize_tags(mistake_tags or [])
+    assumptions = {
+        **order.execution_assumptions,
+        "mistake_tags": "|".join(tags),
+        "lesson": (lesson or "").strip(),
+        "emotion": (emotion or "").strip(),
+        "notes": (notes or "").strip(),
+        "journal_updated_at": timestamp.isoformat(),
+    }
+    event = TradeEvent(
+        event_id=str(uuid.uuid4()),
+        trade_id=order.order_id,
+        event_type=TradeEventType.JOURNAL_UPDATED,
+        occurred_at=timestamp,
+        symbol=order.request.symbol,
+        status=order.status.value,
+        reason="journal learning fields updated",
+        payload={
+            "mistake_tags": "|".join(tags),
+            "lesson": assumptions["lesson"],
+            "emotion": assumptions["emotion"],
+            "notes": assumptions["notes"],
+        },
+    )
+    return order.model_copy(update={"execution_assumptions": assumptions, "events": [*order.events, event]})
+
+
+def journal_learning_summary(entries: list[TradeJournalEntry]) -> dict[str, object]:
+    """Return simple learning metrics for the Streamlit journal."""
+
+    trades = [entry for entry in entries if entry.status != "blocked"]
+    closed = [entry for entry in trades if entry.pnl_r is not None]
+    wins = [entry for entry in closed if (entry.pnl_r or 0.0) > 0.0]
+    tag_counts: dict[str, int] = {}
+    for entry in entries:
+        for tag in entry.mistake_tags:
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+    expectancy = sum(entry.pnl_r or 0.0 for entry in closed) / len(closed) if closed else 0.0
+    return {
+        "paper_trades": len(trades),
+        "closed_trades": len(closed),
+        "win_rate": round(len(wins) / len(closed) * 100.0, 2) if closed else 0.0,
+        "expectancy_r": round(expectancy, 4),
+        "frequent_errors": sorted(tag_counts.items(), key=lambda item: item[1], reverse=True),
+    }
+
+
+def _result_from_order(order: ExecutionOrder) -> str:
+    if order.is_open:
+        return "open"
+    if order.realized_r is None or abs(order.realized_r) < 1e-9:
+        return "breakeven"
+    return "win" if order.realized_r > 0.0 else "loss"
+
+
+def _source_from_mapping(values: dict[str, JournalScalar]) -> str | None:
+    raw = values.get("source")
+    if isinstance(raw, str) and raw in {"manual", "demo_bot"}:
+        return raw
+    return None
+
+
+def _text_from_mapping(values: dict[str, JournalScalar], key: str) -> str | None:
+    raw = values.get(key)
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return None
+
+
+def _updated_at_from_mapping(values: dict[str, JournalScalar]) -> datetime | None:
+    raw = values.get("journal_updated_at")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _tags_from_mapping(values: dict[str, JournalScalar]) -> list[str]:
+    raw = values.get("mistake_tags")
+    if not isinstance(raw, str) or not raw.strip():
+        return []
+    return _normalize_tags([tag.strip() for chunk in raw.split("|") for tag in chunk.split(",")])
+
+
+def _normalize_tags(tags: list[str]) -> list[str]:
+    allowed = set(LEARNING_TAGS)
+    normalized: list[str] = []
+    for tag in tags:
+        clean = tag.strip()
+        if clean not in allowed or clean in normalized:
+            continue
+        normalized.append(clean)
+    return normalized
 
 
 def _events_frame(events: list[TradeEvent]) -> pd.DataFrame:

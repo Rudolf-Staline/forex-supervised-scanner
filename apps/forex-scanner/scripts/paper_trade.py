@@ -10,11 +10,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.config.safety import DemoSafetyError, ensure_demo_safe_mode
 from app.config.settings import load_settings
 from app.core.pipeline import ScannerService
 from app.core.types import OpportunityStatus, TradingStyle
 from app.data.providers import build_provider
-from app.paper.trading import PaperTradingService
+from app.paper.trading import submit_signal_to_paper
 from app.storage.database import Database
 from app.utils.logging import configure_logging
 
@@ -29,6 +30,10 @@ def main() -> None:
 
     configure_logging()
     settings = load_settings()
+    try:
+        ensure_demo_safe_mode(settings, context="paper_trade.py")
+    except DemoSafetyError as exc:
+        raise SystemExit(str(exc))
     if settings.execution.mode != "paper":
         raise SystemExit(f"paper execution is disabled by execution.mode={settings.execution.mode}")
     database = Database(settings.database_absolute_path)
@@ -37,28 +42,30 @@ def main() -> None:
     style = TradingStyle(args.style)
 
     report = ScannerService(settings, provider, database).scan(style, symbols)
-    result = PaperTradingService(settings).submit_approved(report.opportunities)
-    database.save_paper_orders(result.orders)
-    database.save_paper_blocks(result.block_records)
-    database.rebuild_trading_journal()
     executable = [opportunity for opportunity in report.opportunities if opportunity.status in {OpportunityStatus.APPROVED, OpportunityStatus.PREMIUM}]
+    submissions = [
+        submit_signal_to_paper(opportunity, settings=settings, database=database, source="manual", notes="scripts/paper_trade.py")
+        for opportunity in executable
+    ]
+    orders = [submission.order for submission in submissions if submission.order is not None]
+    blocked = [submission for submission in submissions if submission.order is None]
 
     print(
         "paper_trade=ok "
         f"scanned={len(symbols)} opportunities={len(report.opportunities)} executable={len(executable)} "
-        f"orders={len(result.orders)} blocked={len(result.blocked)}"
+        f"orders={len(orders)} blocked={len(blocked)}"
     )
     if not executable:
         print("paper_trade=no_executable_opportunities current scan produced no approved/premium rows")
-    for order in result.orders:
+    for order in orders:
         print(
             "order "
             f"id={order.order_id} symbol={order.request.symbol} status={order.status.value} "
             f"direction={order.request.direction.value} entry={order.request.entry_price:.5f} "
             f"sl={order.request.stop_loss:.5f} tp={order.request.take_profit:.5f}"
         )
-    for key, reasons in result.blocked.items():
-        print(f"blocked {key}: {'; '.join(reasons)}")
+    for submission in blocked:
+        print(f"blocked source={submission.source}: {'; '.join(submission.reasons)}")
 
 
 if __name__ == "__main__":

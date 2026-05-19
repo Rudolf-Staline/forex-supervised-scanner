@@ -17,6 +17,21 @@ def settings() -> AppSettings:
     return load_settings()
 
 
+@pytest.fixture(autouse=True)
+def demo_safety_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EXECUTION_MODE", "paper")
+    monkeypatch.setenv("ALLOW_LIVE_TRADING", "false")
+    monkeypatch.setenv("BROKER_MODE", "paper")
+    monkeypatch.setenv("AUTO_BOT_ENABLED", "false")
+    monkeypatch.setenv("AUTO_BOT_INTERVAL_SECONDS", "300")
+    monkeypatch.setenv("AUTO_BOT_MIN_SCORE", "75")
+    monkeypatch.setenv("AUTO_BOT_ALLOWED_STATUSES", "approved,premium")
+    monkeypatch.setenv("AUTO_BOT_MAX_OPEN_TRADES", "3")
+    monkeypatch.setenv("AUTO_BOT_MAX_TRADES_PER_DAY", "5")
+    monkeypatch.setenv("AUTO_BOT_COOLDOWN_MINUTES", "30")
+    monkeypatch.setenv("AUTO_BOT_MIN_RR", "1.5")
+
+
 def make_ohlcv(rows: int = 260, trend: float = 0.00035, start: float = 1.0) -> pd.DataFrame:
     index = pd.date_range(datetime(2025, 1, 1, tzinfo=timezone.utc), periods=rows, freq="15min")
     steps = np.arange(rows, dtype=float)
@@ -39,4 +54,3 @@ def make_ohlcv(rows: int = 260, trend: float = 0.00035, start: float = 1.0) -> p
 
 def enriched_trend_frame(rows: int = 260, trend: float = 0.00035) -> pd.DataFrame:
     return add_indicators(make_ohlcv(rows=rows, trend=trend))
-

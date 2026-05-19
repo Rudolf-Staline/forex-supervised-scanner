@@ -197,6 +197,11 @@ class PaperExecutor:
 
         return list(self._orders.values())
 
+    def seed_orders(self, orders: list[ExecutionOrder]) -> None:
+        """Load persisted paper orders so guardrails and manual actions see current state."""
+
+        self._orders.update({order.order_id: order for order in orders})
+
     def process_market_data(self, symbol: str, bars: pd.DataFrame) -> PaperFillResult:
         """Advance pending/open orders for one symbol using completed bars."""
 

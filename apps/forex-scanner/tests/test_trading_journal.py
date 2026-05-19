@@ -9,7 +9,7 @@ import pandas as pd
 from app.core.types import DirectionBias, SetupFamily, SetupSubtype, TradingStyle
 from app.execution.models import OrderRequest, TradeEventType
 from app.execution.paper import PaperExecutor
-from app.paper.journal import all_trade_events, export_trading_journal, journal_entries_from_orders, reconstruct_event_trail
+from app.paper.journal import LEARNING_TAGS, all_trade_events, apply_learning_review, export_trading_journal, journal_entries_from_orders, journal_learning_summary, reconstruct_event_trail
 
 
 def _request() -> OrderRequest:
@@ -60,10 +60,39 @@ def test_journal_reconstructs_order_events_and_histories(settings) -> None:
     trail = reconstruct_event_trail(updated.order_id, events)
 
     assert entries[0].entry_rationale_summary == "trend continuation with clean pullback"
+    assert entries[0].direction == "long"
+    assert entries[0].result == "win"
+    assert entries[0].pnl_r is not None and entries[0].pnl_r > 0.0
     assert entries[0].partial_close_history
     assert entries[0].stop_movement_history
     assert trail[0].event_type == TradeEventType.SIGNAL_PREMIUM
     assert trail[-1].event_type == TradeEventType.TRADE_CLOSED
+
+
+def test_journal_learning_fields_are_editable_and_summarized(settings) -> None:
+    executor = PaperExecutor(settings)
+    order = executor.place_order(_request())
+    reviewed = apply_learning_review(
+        order,
+        mistake_tags=[LEARNING_TAGS[0], LEARNING_TAGS[3], "unknown"],
+        lesson="Wait for confirmation.",
+        emotion="calm",
+        notes="Good patience after London open.",
+        updated_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+    )
+
+    entries = journal_entries_from_orders([reviewed])
+    events = all_trade_events([reviewed])
+    summary = journal_learning_summary(entries)
+
+    assert entries[0].source is None
+    assert entries[0].mistake_tags == [LEARNING_TAGS[0], LEARNING_TAGS[3]]
+    assert entries[0].lesson == "Wait for confirmation."
+    assert entries[0].emotion == "calm"
+    assert entries[0].notes == "Good patience after London open."
+    assert entries[0].updated_at == datetime(2025, 1, 2, tzinfo=timezone.utc)
+    assert summary["frequent_errors"] == [(LEARNING_TAGS[0], 1), (LEARNING_TAGS[3], 1)]
+    assert events[-1].event_type == TradeEventType.JOURNAL_UPDATED
 
 
 def test_journal_export_writes_operator_files(settings, tmp_path) -> None:

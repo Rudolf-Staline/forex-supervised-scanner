@@ -23,6 +23,19 @@ def test_default_config_loads_required_styles() -> None:
     assert settings.execution_capabilities.paper_enabled
     assert settings.execution_capabilities.broker_sandbox_enabled
     assert not settings.execution_capabilities.broker_live_enabled
+    assert settings.safety.execution_mode == "paper"
+    assert not settings.safety.allow_live_trading
+    assert settings.safety.broker_mode == "paper"
+    assert not settings.safety.auto_bot_enabled
+    assert settings.safety.require_environment_lock
+    assert not settings.demo_bot.auto_bot_enabled
+    assert settings.demo_bot.interval_seconds == 300
+    assert settings.demo_bot.min_score == 75.0
+    assert settings.demo_bot.allowed_statuses == ["approved", "premium"]
+    assert settings.demo_bot.max_open_trades == 3
+    assert settings.demo_bot.max_trades_per_day == 5
+    assert settings.demo_bot.cooldown_minutes == 30.0
+    assert settings.demo_bot.min_rr == 1.5
     assert settings.execution.spread_aware_fills
     assert settings.execution.partial_exit_fractions.tp1 + settings.execution.partial_exit_fractions.tp2 + settings.execution.partial_exit_fractions.tp3 <= 1.0
     assert settings.portfolio_risk.enabled
