@@ -119,6 +119,45 @@ L'interface Streamlit affiche l'état du système :
 13. Aller dans `Backtest` pour lancer un backtest simple.
 14. Aller dans `Rapports / Audit` pour consulter les événements, exports et informations de sécurité.
 
+## Tester Le Bot Demo
+
+Depuis Streamlit :
+
+1. Ouvrir l'onglet `Bot Demo`.
+2. Vérifier que le statut est `STOPPED`.
+3. Cliquer sur `Run one cycle` pour lancer un seul cycle paper/demo.
+4. Lire les logs, décisions `ACCEPT` / `REJECT` et trades paper créés.
+
+Depuis le terminal, lancer un seul cycle :
+
+```powershell
+python scripts/run_one_cycle.py
+```
+
+Options utiles :
+
+```powershell
+python scripts/run_one_cycle.py --style day_trading --symbols EUR/USD GBP/USD USD/CHF
+```
+
+Lancer le bot local continu, uniquement après action explicite de l'utilisateur :
+
+```powershell
+python scripts/run_demo_bot.py
+```
+
+Le script respecte `AUTO_BOT_INTERVAL_SECONDS` et s'arrête proprement avec `Ctrl+C`.
+
+Tester la création d'un ordre paper avec une fixture contrôlée :
+
+```powershell
+python scripts/run_approved_fixture_cycle.py
+```
+
+Ce script affiche `TEST FIXTURE — données synthétiques — aucun marché réel`, utilise `ensure_demo_safe_mode()` et vérifie qu'un ordre paper est créé dans une base temporaire de test. Il ne doit jamais être utilisé comme trading réel.
+
+Si `python scripts/run_one_cycle.py` crée `0` trade, ce n'est pas forcément une erreur. Les garde-fous peuvent rejeter les signaux `rejected`, `detected`, `watchlist`, les scores insuffisants, le risk/reward insuffisant, les niveaux incomplets, les doublons, le cooldown ou les limites de positions.
+
 ## Onglets Disponibles
 
 - `Scanner` : scan Forex multi-timeframe.
