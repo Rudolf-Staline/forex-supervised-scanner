@@ -21,6 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.config.env import load_dotenv
 from app.config.safety import DemoSafetyError, ensure_demo_safe_mode
 from app.config.settings import AppSettings, load_settings
+from app.execution.mt5_filling import resolve_mt5_filling_mode_or_try_fallbacks
 from app.execution.mt5_demo_broker import MT5_LOGIN_ENV, MT5_PASSWORD_ENV, MT5_PATH_ENV, MT5_SERVER_ENV
 from app.utils.logging import configure_logging
 
@@ -28,7 +29,6 @@ DERIV_DEMO_SERVER = "Deriv-Demo"
 CONFIRMATION_TEXT = "DEMO_ORDER"
 SCRIPT_CONTEXT = "mt5_place_tiny_demo_order.py"
 PREFERRED_FOREX_SYMBOLS = ("EURUSD", "GBPUSD", "USDCHF", "USDJPY", "AUDUSD", "USDCAD")
-UNSUPPORTED_FILLING_RETCODE = 10030
 
 
 def main() -> None:
@@ -258,30 +258,6 @@ def _build_order_payload(
     }
 
 
-def get_supported_filling_modes(mt5: object, symbol_info: object) -> list[tuple[str, int]]:
-    """Return MT5 filling modes to try for this symbol without calling MT5."""
-
-    modes: list[tuple[str, int]] = []
-    for label, attr_name in (
-        ("IOC", "ORDER_FILLING_IOC"),
-        ("FOK", "ORDER_FILLING_FOK"),
-        ("RETURN", "ORDER_FILLING_RETURN"),
-    ):
-        raw = getattr(mt5, attr_name, None)
-        if raw is None:
-            continue
-        try:
-            mode = int(raw)
-        except (TypeError, ValueError):
-            continue
-        if (label, mode) not in modes:
-            modes.append((label, mode))
-    symbol_mode = getattr(symbol_info, "filling_mode", None)
-    if symbol_mode is not None:
-        print(f"symbol_info_filling_mode_raw={symbol_mode}")
-    return modes
-
-
 def _send_with_supported_filling_mode(
     mt5: object,
     settings: AppSettings,
@@ -290,45 +266,26 @@ def _send_with_supported_filling_mode(
     tick: object,
     volume: float,
 ) -> None:
-    modes = get_supported_filling_modes(mt5, symbol_info)
-    if not modes:
+    symbol_mode = getattr(symbol_info, "filling_mode", None)
+    if symbol_mode is not None:
+        print(f"symbol_info_filling_mode_raw={symbol_mode}")
+    resolution = resolve_mt5_filling_mode_or_try_fallbacks(
+        mt5,
+        symbol=symbol,
+        symbol_info=symbol_info,
+        build_payload=lambda filling_mode: _build_order_payload(mt5, settings, symbol, symbol_info, tick, volume, filling_mode=filling_mode),
+    )
+    for attempt in resolution.attempts:
+        print(
+            "filling_attempt "
+            f"symbol={attempt.symbol} mode={attempt.filling_mode_label} value={attempt.filling_mode} "
+            f"retcode={attempt.retcode} comment={attempt.comment}"
+        )
+    _print_order_response(mt5, resolution.result)
+    if resolution.filling_mode_label:
+        print(f"filling_mode_used={resolution.filling_mode_label}")
+    else:
         print("No compatible filling mode found for this symbol")
-        return
-    success_codes = _success_retcodes(mt5)
-    for label, mode in modes:
-        print(f"trying_filling_mode={label} value={mode}")
-        payload = _build_order_payload(mt5, settings, symbol, symbol_info, tick, volume, filling_mode=mode)
-        result = mt5.order_send(payload)
-        _print_order_response(mt5, result)
-        retcode = _retcode(result)
-        if retcode in success_codes:
-            print(f"filling_mode_used={label}")
-            return
-        if retcode == UNSUPPORTED_FILLING_RETCODE:
-            continue
-        return
-    print("No compatible filling mode found for this symbol")
-
-
-def _success_retcodes(mt5: object) -> set[int]:
-    values = [
-        getattr(mt5, "TRADE_RETCODE_DONE", 10009),
-        getattr(mt5, "TRADE_RETCODE_PLACED", 10008),
-        getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", None),
-    ]
-    return {int(value) for value in values if value is not None}
-
-
-def _retcode(result: object | None) -> int | None:
-    if result is None:
-        return None
-    raw = getattr(result, "retcode", None)
-    if raw is None:
-        return None
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return None
 
 
 def _print_order_response(mt5: object, result: object | None) -> None:

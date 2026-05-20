@@ -7,6 +7,8 @@ explicit operator-triggered MT5 demo testing and never enables live trading.
 from __future__ import annotations
 
 import importlib
+import json
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
@@ -17,13 +19,17 @@ from app.config.settings import AppSettings
 from app.core.types import DirectionBias
 from app.execution.broker import BrokerExecutionError, append_broker_transition
 from app.execution.models import BrokerAccountState, BrokerErrorCategory, BrokerOrderState, ExecutionOrder, OrderRequest, OrderStatus, TradeEventType
+from app.execution.mt5_filling import filling_attempts_payload, resolve_mt5_filling_mode_or_try_fallbacks
 
 MT5_DEMO_MODE = "mt5_demo"
 MT5_LOGIN_ENV = "MT5_LOGIN"
 MT5_PASSWORD_ENV = "MT5_PASSWORD"
 MT5_SERVER_ENV = "MT5_SERVER"
 MT5_PATH_ENV = "MT5_PATH"
+DERIV_DEMO_SERVER = "Deriv-Demo"
 MAX_DEMO_VOLUME_LOTS = 0.01
+
+LOGGER = logging.getLogger(__name__)
 
 
 class MT5SymbolMapper:
@@ -101,6 +107,10 @@ class MT5DemoBroker:
         if account is None:
             self.disconnect()
             raise BrokerExecutionError("MT5 demo account_info unavailable", BrokerErrorCategory.ACCOUNT_UNAVAILABLE)
+        account_server = str(getattr(account, "server", "")).strip()
+        if account_server != DERIV_DEMO_SERVER:
+            self.disconnect()
+            raise BrokerExecutionError(f"MT5 demo account server must be {DERIV_DEMO_SERVER}, got {account_server}", BrokerErrorCategory.CONFIGURATION)
         if not _account_is_demo(mt5, account):
             self.disconnect()
             raise BrokerExecutionError("MT5 account is not a demo account; refusing mt5_demo mode", BrokerErrorCategory.CONFIGURATION)
@@ -143,9 +153,12 @@ class MT5DemoBroker:
         tick = getattr(mt5, "symbol_info_tick")(symbol)
         if tick is None:
             raise BrokerExecutionError(f"MT5 demo tick unavailable for {symbol}", BrokerErrorCategory.CONNECTIVITY)
+        symbol_info = getattr(mt5, "symbol_info")(symbol)
+        if symbol_info is None:
+            raise BrokerExecutionError(f"MT5 demo symbol_info unavailable for {symbol}", BrokerErrorCategory.CONNECTIVITY)
         demo_volume = min(float(self.settings.broker.default_volume_lots), MAX_DEMO_VOLUME_LOTS)
         broker_request = request.model_copy(update={"quantity_units": demo_volume})
-        payload = _order_payload(mt5, symbol, broker_request, float(tick.ask), float(tick.bid), self.settings)
+        base_payload = _order_payload(mt5, symbol, broker_request, float(tick.ask), float(tick.bid), self.settings)
         now = datetime.now(timezone.utc)
         order = ExecutionOrder(
             order_id=str(uuid.uuid4()),
@@ -157,15 +170,32 @@ class MT5DemoBroker:
             broker_mode=MT5_DEMO_MODE,
             broker_name="mt5",
             broker_state=BrokerOrderState.INTENT_CREATED,
-            broker_submission={key: value for key, value in payload.items() if key != "password"},
+            broker_submission={key: value for key, value in base_payload.items() if key != "password"},
             execution_assumptions={"broker": "mt5", "mode": MT5_DEMO_MODE, "live_money": False, "demo_only": True},
         )
         order = append_broker_transition(order, BrokerOrderState.INTENT_CREATED, TradeEventType.BROKER_INTENT_CREATED, now)
         order = append_broker_transition(order, BrokerOrderState.PRETRADE_VALIDATED, TradeEventType.BROKER_PRETRADE_VALIDATED, now)
         order = append_broker_transition(order, BrokerOrderState.SUBMIT_REQUESTED, TradeEventType.BROKER_SUBMIT_REQUESTED, now, payload={"symbol": symbol, "mode": MT5_DEMO_MODE})
-        result = getattr(mt5, "order_send")(payload)
+        resolution = resolve_mt5_filling_mode_or_try_fallbacks(
+            mt5,
+            symbol=symbol,
+            symbol_info=symbol_info,
+            build_payload=lambda filling_mode: {**base_payload, "type_filling": filling_mode},
+            logger=LOGGER,
+        )
+        payload = resolution.payload or base_payload
+        attempts_payload = filling_attempts_payload(resolution.attempts)
+        attempts_summary = json.dumps(attempts_payload, sort_keys=True)
+        result = resolution.result
         if result is None:
-            order = append_broker_transition(order, BrokerOrderState.MANUAL_INTERVENTION_REQUIRED, TradeEventType.MANUAL_INTERVENTION_REQUIRED, now, reason="MT5 demo order_send returned no acknowledgement")
+            order = append_broker_transition(
+                order,
+                BrokerOrderState.MANUAL_INTERVENTION_REQUIRED,
+                TradeEventType.MANUAL_INTERVENTION_REQUIRED,
+                now,
+                reason="MT5 demo order_send returned no acknowledgement",
+                payload={"symbol": symbol, "filling_attempts": attempts_summary},
+            )
             raise BrokerExecutionError("MT5 demo order_send returned no acknowledgement", BrokerErrorCategory.TIMEOUT)
         retcode = int(getattr(result, "retcode", -1))
         broker_order_id = str(getattr(result, "order", ""))
@@ -173,6 +203,9 @@ class MT5DemoBroker:
             "retcode": retcode,
             "comment": str(getattr(result, "comment", "")),
             "broker_order_id": broker_order_id,
+            "filling_mode": resolution.filling_mode_label,
+            "filling_mode_value": resolution.filling_mode,
+            "filling_attempts": attempts_summary,
         }
         success_codes = {int(getattr(mt5, "TRADE_RETCODE_DONE", 10009)), int(getattr(mt5, "TRADE_RETCODE_PLACED", 10008))}
         if retcode not in success_codes:
@@ -180,7 +213,19 @@ class MT5DemoBroker:
             order = append_broker_transition(order, BrokerOrderState.REJECTED, TradeEventType.BROKER_REJECTED, now, reason=acknowledgement["comment"], payload=acknowledgement)
             raise BrokerExecutionError(f"MT5 demo rejected order: {acknowledgement['comment']}", BrokerErrorCategory.ORDER_REJECTED)
         order = order.model_copy(update={"broker_order_id": broker_order_id, "broker_acknowledgement": acknowledgement})
-        order = append_broker_transition(order, BrokerOrderState.SUBMITTED, TradeEventType.BROKER_SUBMITTED, now, payload={"broker_order_id": broker_order_id, "mode": MT5_DEMO_MODE})
+        order = order.model_copy(update={"broker_submission": {key: value for key, value in payload.items() if key != "password"}})
+        order = append_broker_transition(
+            order,
+            BrokerOrderState.SUBMITTED,
+            TradeEventType.BROKER_SUBMITTED,
+            now,
+            payload={
+                "broker_order_id": broker_order_id,
+                "mode": MT5_DEMO_MODE,
+                "filling_mode": resolution.filling_mode_label,
+                "filling_mode_value": resolution.filling_mode,
+            },
+        )
         order = append_broker_transition(order, BrokerOrderState.ACKNOWLEDGED, TradeEventType.BROKER_ACKNOWLEDGED, now, payload=acknowledgement)
         return order
 
@@ -203,7 +248,6 @@ def _order_payload(mt5: object, symbol: str, request: OrderRequest, ask: float, 
         "magic": settings.broker.magic_number,
         "comment": f"{settings.broker.comment_prefix}:mt5_demo"[:31],
         "type_time": getattr(mt5, "ORDER_TIME_GTC"),
-        "type_filling": getattr(mt5, "ORDER_FILLING_RETURN"),
     }
 
 
@@ -222,6 +266,8 @@ def _mt5_credentials() -> dict[str, str | int]:
     missing = [name for name, value in {MT5_LOGIN_ENV: login, MT5_PASSWORD_ENV: password, MT5_SERVER_ENV: server}.items() if not value]
     if missing:
         raise BrokerExecutionError(f"missing MT5 demo credential env vars: {', '.join(missing)}", BrokerErrorCategory.CONFIGURATION)
+    if str(server).strip() != DERIV_DEMO_SERVER:
+        raise BrokerExecutionError(f"{MT5_SERVER_ENV} must be {DERIV_DEMO_SERVER}", BrokerErrorCategory.CONFIGURATION)
     try:
         login_value = int(str(login))
     except ValueError as exc:

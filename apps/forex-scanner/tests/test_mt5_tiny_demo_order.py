@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from scripts.mt5_place_tiny_demo_order import get_supported_filling_modes
+from app.execution.mt5_filling import get_supported_filling_modes
 
 
 def test_get_supported_filling_modes_returns_safe_retry_order() -> None:

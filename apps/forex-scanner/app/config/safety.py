@@ -161,4 +161,9 @@ def _mt5_demo_environment_reasons() -> list[str]:
         reasons.append("missing safety environment variable MT5_DEMO_ONLY=true")
     elif raw.strip().lower() != "true":
         reasons.append(f"MT5_DEMO_ONLY must be true, got {raw}")
+    server = os.getenv("MT5_SERVER")
+    if server is None:
+        reasons.append("missing safety environment variable MT5_SERVER=Deriv-Demo")
+    elif server.strip() != "Deriv-Demo":
+        reasons.append(f"MT5_SERVER must be Deriv-Demo, got {server}")
     return reasons

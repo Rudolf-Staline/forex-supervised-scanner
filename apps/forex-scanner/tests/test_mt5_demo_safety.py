@@ -43,9 +43,17 @@ def test_mt5_demo_safe_mode_requires_live_trading_disabled(settings, monkeypatch
         ensure_mt5_demo_safe_mode(settings, context="mt5 demo")
 
 
+def test_mt5_demo_safe_mode_requires_deriv_demo_server(settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_mt5_demo_env(monkeypatch)
+    monkeypatch.setenv("MT5_SERVER", "FTMO-Demo")
+
+    with pytest.raises(DemoSafetyError, match="MT5_SERVER must be Deriv-Demo"):
+        ensure_mt5_demo_safe_mode(settings, context="mt5 demo")
+
+
 def test_mt5_demo_broker_refuses_non_demo_account(settings, monkeypatch: pytest.MonkeyPatch) -> None:
     _set_mt5_demo_env(monkeypatch)
-    fake = _FakeMT5(account=_Account(trade_mode=1, server="FTMO-Real"))
+    fake = _FakeMT5(account=_Account(trade_mode=1, server="Deriv-Demo"))
 
     broker = MT5DemoBroker(settings, mt5_module=fake)
 
@@ -67,11 +75,13 @@ def test_mt5_demo_broker_places_tiny_demo_order_without_storing_password(setting
     assert order.execution_assumptions["demo_only"] is True
     assert order.request.quantity_units == 0.01
     assert order.broker_order_id == "123456"
+    assert order.broker_acknowledgement["filling_mode"] == "FOK"
     assert "super-secret-password" not in str(order.broker_submission)
     assert "super-secret-password" not in str(order.execution_assumptions)
     assert fake.last_order_payload["volume"] == 0.01
     assert fake.last_order_payload["sl"] == 1.095
     assert fake.last_order_payload["tp"] == 1.11
+    assert [payload["type_filling"] for payload in fake.order_payloads] == [fake.ORDER_FILLING_IOC, fake.ORDER_FILLING_FOK]
 
 
 def _set_mt5_demo_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -82,7 +92,7 @@ def _set_mt5_demo_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MT5_DEMO_ONLY", "true")
     monkeypatch.setenv("MT5_LOGIN", "123456")
     monkeypatch.setenv("MT5_PASSWORD", "secret")
-    monkeypatch.setenv("MT5_SERVER", "FTMO-Demo")
+    monkeypatch.setenv("MT5_SERVER", "Deriv-Demo")
 
 
 def _request() -> OrderRequest:
@@ -109,7 +119,7 @@ def _request() -> OrderRequest:
 
 
 class _Account:
-    def __init__(self, *, trade_mode: int = 0, server: str = "FTMO-Demo") -> None:
+    def __init__(self, *, trade_mode: int = 0, server: str = "Deriv-Demo") -> None:
         self.login = 123456
         self.server = server
         self.trade_mode = trade_mode
@@ -130,9 +140,15 @@ class _Tick:
 
 
 class _Result:
-    retcode = 10008
-    order = 123456
-    comment = "placed"
+    def __init__(self, retcode: int, comment: str) -> None:
+        self.retcode = retcode
+        self.order = 123456
+        self.comment = comment
+
+
+class _SymbolInfo:
+    filling_mode = 0
+    trade_execution = 0
 
 
 class _FakeMT5:
@@ -143,7 +159,9 @@ class _FakeMT5:
     ORDER_TYPE_SELL_LIMIT = 3
     ORDER_TYPE_SELL_STOP = 5
     ORDER_TIME_GTC = 0
-    ORDER_FILLING_RETURN = 2
+    ORDER_FILLING_IOC = 1
+    ORDER_FILLING_FOK = 2
+    ORDER_FILLING_RETURN = 3
     TRADE_RETCODE_PLACED = 10008
     TRADE_RETCODE_DONE = 10009
 
@@ -151,6 +169,7 @@ class _FakeMT5:
         self.account = account
         self.last_initialize_kwargs = {}
         self.last_order_payload = {}
+        self.order_payloads = []
         self.shutdown_called = False
 
     def initialize(self, **kwargs) -> bool:
@@ -172,6 +191,12 @@ class _FakeMT5:
     def symbol_info_tick(self, symbol: str):
         return _Tick() if symbol == "EURUSD" else None
 
+    def symbol_info(self, symbol: str):
+        return _SymbolInfo() if symbol == "EURUSD" else None
+
     def order_send(self, payload):
         self.last_order_payload = payload
-        return _Result()
+        self.order_payloads.append(payload)
+        if payload["type_filling"] == self.ORDER_FILLING_IOC:
+            return _Result(10030, "Unsupported filling mode")
+        return _Result(10009, "Request executed")
