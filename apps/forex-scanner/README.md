@@ -72,6 +72,22 @@ BROKER_MODE=paper
 AUTO_BOT_ENABLED=false
 ```
 
+Pour tester un compte FTMO Free Trial via MetaTrader 5, garder `EXECUTION_MODE=paper` et `ALLOW_LIVE_TRADING=false`, puis utiliser un fichier `.env` local non commité :
+
+```text
+EXECUTION_MODE=paper
+ALLOW_LIVE_TRADING=false
+BROKER_MODE=mt5_demo
+AUTO_BOT_ENABLED=false
+MT5_DEMO_ONLY=true
+MT5_LOGIN=
+MT5_PASSWORD=
+MT5_SERVER=
+MT5_PATH=
+```
+
+`MT5_PASSWORD` ne doit jamais être affiché ni commité. Le mode MT5 demo refuse de tourner si `MT5_DEMO_ONLY` n'est pas `true`.
+
 ## Initialisation
 
 Créer ou mettre à jour la base SQLite locale :
@@ -131,22 +147,44 @@ Depuis Streamlit :
 Depuis le terminal, lancer un seul cycle :
 
 ```powershell
-python scripts/run_one_cycle.py
+python scripts/run_one_cycle.py --provider synthetic
 ```
 
 Options utiles :
 
 ```powershell
-python scripts/run_one_cycle.py --style day_trading --symbols EUR/USD GBP/USD USD/CHF
+python scripts/run_one_cycle.py --provider synthetic --style day_trading --symbols EUR/USD GBP/USD USD/CHF
+python scripts/run_one_cycle.py --provider auto --style day_trading --symbols EUR/USD GBP/USD USD/CHF
+```
+
+Tester un cycle avec le broker paper par défaut :
+
+```powershell
+python scripts/run_one_cycle.py --provider synthetic --broker paper
+```
+
+Tester la connexion FTMO Free Trial / MT5 demo, sans passer d'ordre :
+
+```powershell
+python scripts/test_mt5_connection.py
+```
+
+Tester un cycle en mode MT5 demo explicite :
+
+```powershell
+python scripts/run_one_cycle.py --provider synthetic --broker mt5_demo
 ```
 
 Lancer le bot local continu, uniquement après action explicite de l'utilisateur :
 
 ```powershell
-python scripts/run_demo_bot.py
+python scripts/run_demo_bot.py --provider synthetic --broker paper
+python scripts/run_demo_bot.py --provider synthetic --broker mt5_demo
 ```
 
-Le script respecte `AUTO_BOT_INTERVAL_SECONDS` et s'arrête proprement avec `Ctrl+C`.
+Le script respecte `AUTO_BOT_INTERVAL_SECONDS` et s'arrête proprement avec `Ctrl+C`. Le provider `synthetic` évite les tentatives MT5/Yahoo pour une démo offline propre. Le provider `auto` reste disponible si vous voulez tester la chaîne MT5, Yahoo puis fallback synthétique.
+
+Le broker `paper` reste le défaut. Le broker `mt5_demo` n'est utilisé que si l'utilisateur le demande explicitement avec `--broker mt5_demo`, si `.env` contient `BROKER_MODE=mt5_demo` et si `MT5_DEMO_ONLY=true`.
 
 Tester la création d'un ordre paper avec une fixture contrôlée :
 
@@ -156,7 +194,7 @@ python scripts/run_approved_fixture_cycle.py
 
 Ce script affiche `TEST FIXTURE — données synthétiques — aucun marché réel`, utilise `ensure_demo_safe_mode()` et vérifie qu'un ordre paper est créé dans une base temporaire de test. Il ne doit jamais être utilisé comme trading réel.
 
-Si `python scripts/run_one_cycle.py` crée `0` trade, ce n'est pas forcément une erreur. Les garde-fous peuvent rejeter les signaux `rejected`, `detected`, `watchlist`, les scores insuffisants, le risk/reward insuffisant, les niveaux incomplets, les doublons, le cooldown ou les limites de positions.
+Si `python scripts/run_one_cycle.py --provider synthetic` crée `0` trade, ce n'est pas forcément une erreur. Les garde-fous peuvent rejeter les signaux `rejected`, `detected`, `watchlist`, les scores insuffisants, le risk/reward insuffisant, les niveaux incomplets, les doublons, le cooldown ou les limites de positions.
 
 ## Onglets Disponibles
 

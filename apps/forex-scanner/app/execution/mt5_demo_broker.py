@@ -1,0 +1,286 @@
+"""FTMO/MetaTrader 5 demo-only broker helper.
+
+This adapter is intentionally separate from broker_live flows. It is only for
+explicit operator-triggered MT5 demo testing and never enables live trading.
+"""
+
+from __future__ import annotations
+
+import importlib
+import os
+import uuid
+from datetime import datetime, timezone
+from typing import Any
+
+from app.config.safety import DemoSafetyError, ensure_mt5_demo_safe_mode
+from app.config.settings import AppSettings
+from app.core.types import DirectionBias
+from app.execution.broker import BrokerExecutionError, append_broker_transition
+from app.execution.models import BrokerAccountState, BrokerErrorCategory, BrokerOrderState, ExecutionOrder, OrderRequest, OrderStatus, TradeEventType
+
+MT5_DEMO_MODE = "mt5_demo"
+MT5_LOGIN_ENV = "MT5_LOGIN"
+MT5_PASSWORD_ENV = "MT5_PASSWORD"
+MT5_SERVER_ENV = "MT5_SERVER"
+MT5_PATH_ENV = "MT5_PATH"
+MAX_DEMO_VOLUME_LOTS = 0.01
+
+
+class MT5SymbolMapper:
+    """Map internal symbols such as EUR/USD to available MT5 symbols."""
+
+    def __init__(self, mt5: object) -> None:
+        self.mt5 = mt5
+
+    def map_symbol(self, internal_symbol: str) -> str:
+        """Return a selected MT5 symbol or raise for unknown symbols."""
+
+        target = _canonical_symbol(internal_symbol)
+        if not target:
+            raise BrokerExecutionError(f"unknown MT5 symbol mapping for {internal_symbol}", BrokerErrorCategory.CONFIGURATION)
+        available = self.available_symbols()
+        matches = [symbol for symbol in available if _canonical_symbol(symbol).startswith(target)]
+        if not matches:
+            raise BrokerExecutionError(f"unknown MT5 symbol mapping for {internal_symbol}", BrokerErrorCategory.CONFIGURATION)
+        exact = [symbol for symbol in matches if _canonical_symbol(symbol) == target]
+        selected = sorted(exact or matches, key=lambda value: (len(value), value))[0]
+        symbol_select = getattr(self.mt5, "symbol_select", None)
+        if callable(symbol_select) and not bool(symbol_select(selected, True)):
+            raise BrokerExecutionError(f"MT5 symbol {selected} could not be selected", BrokerErrorCategory.CONFIGURATION)
+        return selected
+
+    def available_symbols(self) -> list[str]:
+        symbols_get = getattr(self.mt5, "symbols_get", None)
+        if not callable(symbols_get):
+            return []
+        rows = symbols_get() or []
+        return [str(getattr(row, "name", row)) for row in rows if str(getattr(row, "name", row)).strip()]
+
+
+class MT5DemoBroker:
+    """Demo-only MT5 adapter for explicit FTMO Free Trial testing."""
+
+    def __init__(self, settings: AppSettings, *, mt5_module: object | None = None) -> None:
+        try:
+            ensure_mt5_demo_safe_mode(settings, context="MT5 demo broker")
+        except DemoSafetyError as exc:
+            raise BrokerExecutionError(str(exc), BrokerErrorCategory.CONFIGURATION) from exc
+        self.settings = settings
+        self.mt5 = mt5_module
+        self.connected = False
+        self.mapper: MT5SymbolMapper | None = None
+        self.account: object | None = None
+
+    def connect(self) -> BrokerAccountState:
+        """Connect to MT5 and refuse non-demo accounts."""
+
+        mt5 = self.mt5 or _load_mt5_module()
+        if mt5 is None:
+            raise BrokerExecutionError("MetaTrader5 package is not installed", BrokerErrorCategory.CONFIGURATION)
+        credentials = _mt5_credentials()
+        timeout_ms = int(self.settings.broker.connect_timeout_seconds * 1000)
+        initialize = getattr(mt5, "initialize")
+        kwargs: dict[str, Any] = {
+            "login": credentials["login"],
+            "password": credentials["password"],
+            "server": credentials["server"],
+            "timeout": timeout_ms,
+        }
+        if credentials.get("path"):
+            kwargs["path"] = credentials["path"]
+        try:
+            ok = bool(initialize(**kwargs))
+        except TypeError:
+            kwargs.pop("timeout", None)
+            ok = bool(initialize(**kwargs))
+        if not ok:
+            last_error = getattr(mt5, "last_error", lambda: "unknown")()
+            raise BrokerExecutionError(f"MT5 demo initialize failed: {last_error}", BrokerErrorCategory.CONNECTIVITY)
+
+        account = getattr(mt5, "account_info")()
+        if account is None:
+            self.disconnect()
+            raise BrokerExecutionError("MT5 demo account_info unavailable", BrokerErrorCategory.ACCOUNT_UNAVAILABLE)
+        if not _account_is_demo(mt5, account):
+            self.disconnect()
+            raise BrokerExecutionError("MT5 account is not a demo account; refusing mt5_demo mode", BrokerErrorCategory.CONFIGURATION)
+
+        self.mt5 = mt5
+        self.connected = True
+        self.mapper = MT5SymbolMapper(mt5)
+        self.account = account
+        return _account_state(account)
+
+    def disconnect(self) -> None:
+        """Shutdown MT5 if connected."""
+
+        if self.mt5 is not None and self.connected:
+            shutdown = getattr(self.mt5, "shutdown", None)
+            if callable(shutdown):
+                shutdown()
+        self.connected = False
+
+    def query_account_state(self) -> BrokerAccountState:
+        """Return a sanitized demo account snapshot."""
+
+        mt5 = self._connected_mt5()
+        account = getattr(mt5, "account_info")()
+        if account is None:
+            raise BrokerExecutionError("MT5 demo account_info unavailable", BrokerErrorCategory.ACCOUNT_UNAVAILABLE)
+        if not _account_is_demo(mt5, account):
+            raise BrokerExecutionError("MT5 account is not a demo account; refusing mt5_demo mode", BrokerErrorCategory.CONFIGURATION)
+        return _account_state(account)
+
+    def place_order(self, request: OrderRequest) -> ExecutionOrder:
+        """Place a very small pending order on the connected demo account."""
+
+        mt5 = self._connected_mt5()
+        account = self.query_account_state()
+        if not account.can_trade:
+            raise BrokerExecutionError("MT5 demo account is not tradable", BrokerErrorCategory.ACCOUNT_UNAVAILABLE)
+        mapper = self.mapper or MT5SymbolMapper(mt5)
+        symbol = mapper.map_symbol(request.symbol)
+        tick = getattr(mt5, "symbol_info_tick")(symbol)
+        if tick is None:
+            raise BrokerExecutionError(f"MT5 demo tick unavailable for {symbol}", BrokerErrorCategory.CONNECTIVITY)
+        demo_volume = min(float(self.settings.broker.default_volume_lots), MAX_DEMO_VOLUME_LOTS)
+        broker_request = request.model_copy(update={"quantity_units": demo_volume})
+        payload = _order_payload(mt5, symbol, broker_request, float(tick.ask), float(tick.bid), self.settings)
+        now = datetime.now(timezone.utc)
+        order = ExecutionOrder(
+            order_id=str(uuid.uuid4()),
+            request=broker_request,
+            status=OrderStatus.PENDING,
+            created_at=now,
+            signal_timestamp=broker_request.signal_timestamp,
+            initial_stop_loss=broker_request.stop_loss,
+            broker_mode=MT5_DEMO_MODE,
+            broker_name="mt5",
+            broker_state=BrokerOrderState.INTENT_CREATED,
+            broker_submission={key: value for key, value in payload.items() if key != "password"},
+            execution_assumptions={"broker": "mt5", "mode": MT5_DEMO_MODE, "live_money": False, "demo_only": True},
+        )
+        order = append_broker_transition(order, BrokerOrderState.INTENT_CREATED, TradeEventType.BROKER_INTENT_CREATED, now)
+        order = append_broker_transition(order, BrokerOrderState.PRETRADE_VALIDATED, TradeEventType.BROKER_PRETRADE_VALIDATED, now)
+        order = append_broker_transition(order, BrokerOrderState.SUBMIT_REQUESTED, TradeEventType.BROKER_SUBMIT_REQUESTED, now, payload={"symbol": symbol, "mode": MT5_DEMO_MODE})
+        result = getattr(mt5, "order_send")(payload)
+        if result is None:
+            order = append_broker_transition(order, BrokerOrderState.MANUAL_INTERVENTION_REQUIRED, TradeEventType.MANUAL_INTERVENTION_REQUIRED, now, reason="MT5 demo order_send returned no acknowledgement")
+            raise BrokerExecutionError("MT5 demo order_send returned no acknowledgement", BrokerErrorCategory.TIMEOUT)
+        retcode = int(getattr(result, "retcode", -1))
+        broker_order_id = str(getattr(result, "order", ""))
+        acknowledgement = {
+            "retcode": retcode,
+            "comment": str(getattr(result, "comment", "")),
+            "broker_order_id": broker_order_id,
+        }
+        success_codes = {int(getattr(mt5, "TRADE_RETCODE_DONE", 10009)), int(getattr(mt5, "TRADE_RETCODE_PLACED", 10008))}
+        if retcode not in success_codes:
+            order = order.model_copy(update={"broker_acknowledgement": acknowledgement, "rejection_reason": acknowledgement["comment"]})
+            order = append_broker_transition(order, BrokerOrderState.REJECTED, TradeEventType.BROKER_REJECTED, now, reason=acknowledgement["comment"], payload=acknowledgement)
+            raise BrokerExecutionError(f"MT5 demo rejected order: {acknowledgement['comment']}", BrokerErrorCategory.ORDER_REJECTED)
+        order = order.model_copy(update={"broker_order_id": broker_order_id, "broker_acknowledgement": acknowledgement})
+        order = append_broker_transition(order, BrokerOrderState.SUBMITTED, TradeEventType.BROKER_SUBMITTED, now, payload={"broker_order_id": broker_order_id, "mode": MT5_DEMO_MODE})
+        order = append_broker_transition(order, BrokerOrderState.ACKNOWLEDGED, TradeEventType.BROKER_ACKNOWLEDGED, now, payload=acknowledgement)
+        return order
+
+    def _connected_mt5(self) -> object:
+        if self.mt5 is None or not self.connected:
+            raise BrokerExecutionError("MT5 demo connection was not established", BrokerErrorCategory.CONNECTIVITY)
+        return self.mt5
+
+
+def _order_payload(mt5: object, symbol: str, request: OrderRequest, ask: float, bid: float, settings: AppSettings) -> dict[str, object]:
+    return {
+        "action": getattr(mt5, "TRADE_ACTION_PENDING"),
+        "symbol": symbol,
+        "volume": request.quantity_units,
+        "type": _pending_order_type(mt5, request, ask, bid),
+        "price": request.entry_price,
+        "sl": request.stop_loss,
+        "tp": request.take_profit,
+        "deviation": settings.broker.order_deviation_points,
+        "magic": settings.broker.magic_number,
+        "comment": f"{settings.broker.comment_prefix}:mt5_demo"[:31],
+        "type_time": getattr(mt5, "ORDER_TIME_GTC"),
+        "type_filling": getattr(mt5, "ORDER_FILLING_RETURN"),
+    }
+
+
+def _pending_order_type(mt5: object, request: OrderRequest, ask: float, bid: float) -> int:
+    if request.direction == DirectionBias.LONG:
+        return int(getattr(mt5, "ORDER_TYPE_BUY_STOP") if request.entry_price >= ask else getattr(mt5, "ORDER_TYPE_BUY_LIMIT"))
+    if request.direction == DirectionBias.SHORT:
+        return int(getattr(mt5, "ORDER_TYPE_SELL_STOP") if request.entry_price <= bid else getattr(mt5, "ORDER_TYPE_SELL_LIMIT"))
+    raise BrokerExecutionError("MT5 demo only accepts long or short orders", BrokerErrorCategory.CONFIGURATION)
+
+
+def _mt5_credentials() -> dict[str, str | int]:
+    login = os.getenv(MT5_LOGIN_ENV)
+    password = os.getenv(MT5_PASSWORD_ENV)
+    server = os.getenv(MT5_SERVER_ENV)
+    missing = [name for name, value in {MT5_LOGIN_ENV: login, MT5_PASSWORD_ENV: password, MT5_SERVER_ENV: server}.items() if not value]
+    if missing:
+        raise BrokerExecutionError(f"missing MT5 demo credential env vars: {', '.join(missing)}", BrokerErrorCategory.CONFIGURATION)
+    try:
+        login_value = int(str(login))
+    except ValueError as exc:
+        raise BrokerExecutionError("MT5_LOGIN must be an integer account id", BrokerErrorCategory.CONFIGURATION) from exc
+    payload: dict[str, str | int] = {
+        "login": login_value,
+        "password": str(password),
+        "server": str(server),
+    }
+    path = os.getenv(MT5_PATH_ENV)
+    if path:
+        payload["path"] = path
+    return payload
+
+
+def _account_state(account: object) -> BrokerAccountState:
+    return BrokerAccountState(
+        broker="mt5",
+        mode=MT5_DEMO_MODE,
+        connected=True,
+        can_trade=bool(getattr(account, "trade_allowed", True)),
+        balance=_optional_float(getattr(account, "balance", None)),
+        equity=_optional_float(getattr(account, "equity", None)),
+        free_margin=_optional_float(getattr(account, "margin_free", None)),
+        currency=str(getattr(account, "currency", "")) or None,
+        account_id=str(getattr(account, "login", "")) or None,
+        server=str(getattr(account, "server", "")) or None,
+        is_demo=True,
+        retrieved_at=datetime.now(timezone.utc),
+        health_status="healthy" if bool(getattr(account, "trade_allowed", True)) else "connected_not_tradable",
+        raw_summary={
+            "login": str(getattr(account, "login", "")),
+            "server": str(getattr(account, "server", "")),
+            "trade_mode": str(getattr(account, "trade_mode", "")),
+        },
+    )
+
+
+def _account_is_demo(mt5: object, account: object) -> bool:
+    trade_mode = getattr(account, "trade_mode", None)
+    demo_constant = getattr(mt5, "ACCOUNT_TRADE_MODE_DEMO", None)
+    if demo_constant is not None and trade_mode is not None:
+        return int(trade_mode) == int(demo_constant)
+    server = str(getattr(account, "server", "")).lower()
+    return "demo" in server or "trial" in server
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+def _canonical_symbol(value: str) -> str:
+    return "".join(char for char in value.upper() if char.isalnum())
+
+
+def _load_mt5_module() -> object | None:
+    try:
+        return importlib.import_module("MetaTrader5")
+    except ImportError:
+        return None

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from pydantic import BaseModel, Field
 
-from app.config.safety import ensure_demo_safe_mode
+from app.config.safety import ensure_demo_bot_safe_mode
 from app.config.settings import AppSettings
 from app.core.pipeline import ScannerService
 from app.core.types import DirectionBias, MarketRegime, Opportunity, OpportunityStatus, SessionName, TradingStyle
@@ -57,7 +57,7 @@ class DemoBotService:
     def run_cycle(self, style: TradingStyle, symbols: list[str]) -> DemoBotCycleResult:
         """Scan, filter, guard, create paper orders, and persist decision events."""
 
-        ensure_demo_safe_mode(self.settings, context="demo bot cycle")
+        ensure_demo_bot_safe_mode(self.settings, context="demo bot cycle")
         cycle_id = str(uuid.uuid4())
         started = datetime.now(timezone.utc)
         events = [_event(cycle_id, TradeEventType.DEMO_BOT_CYCLE_STARTED, started, "BOT", "started", "cycle started")]

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
 
-from app.config.safety import ensure_demo_safe_mode
+from app.config.safety import ensure_demo_bot_safe_mode, ensure_demo_safe_mode
 from app.config.settings import AppSettings
 from app.core.types import Opportunity, OpportunityStatus
 from app.execution.models import CloseReason, ExecutionOrder, OrderRequest, PaperBlockRecord, TradeEvent, TradeEventType
@@ -54,7 +54,7 @@ class PaperTradingService:
         existing_orders: list[ExecutionOrder] | None = None,
     ) -> None:
         self.settings = settings
-        ensure_demo_safe_mode(settings, context="paper trading service")
+        ensure_demo_bot_safe_mode(settings, context="paper trading service")
         self.executor = executor or PaperExecutor(settings)
         if existing_orders:
             self.executor.seed_orders(existing_orders)
@@ -104,7 +104,7 @@ def submit_signal_to_paper(
     the paper order, and stores an auditable event in SQLite.
     """
 
-    ensure_demo_safe_mode(settings, context="submit signal to paper")
+    ensure_demo_bot_safe_mode(settings, context="submit signal to paper")
     if source not in {"manual", "demo_bot"}:
         raise ValueError("paper source must be 'manual' or 'demo_bot'")
 
