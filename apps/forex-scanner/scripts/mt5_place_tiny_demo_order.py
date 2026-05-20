@@ -7,6 +7,7 @@ safety lock and Deriv-Demo environment variables are explicit.
 
 from __future__ import annotations
 
+import argparse
 import importlib
 import os
 import sys
@@ -27,11 +28,13 @@ DERIV_DEMO_SERVER = "Deriv-Demo"
 CONFIRMATION_TEXT = "DEMO_ORDER"
 SCRIPT_CONTEXT = "mt5_place_tiny_demo_order.py"
 PREFERRED_FOREX_SYMBOLS = ("EURUSD", "GBPUSD", "USDCHF", "USDJPY", "AUDUSD", "USDCAD")
+UNSUPPORTED_FILLING_RETCODE = 10030
 
 
 def main() -> None:
     """Connect to Deriv-Demo and place one minimum-volume demo order."""
 
+    args = _parse_args()
     load_dotenv()
     configure_logging()
     settings = load_settings()
@@ -52,34 +55,42 @@ def main() -> None:
 
         symbols = _available_symbol_names(mt5)
         print("available_symbols_sample=" + ", ".join(symbols[:12]))
-        symbol = _choose_demo_symbol(mt5, symbols)
+        symbol = _choose_demo_symbol(mt5, symbols, requested_symbol=args.symbol)
         symbol_info = mt5.symbol_info(symbol)
         tick = mt5.symbol_info_tick(symbol)
         if symbol_info is None or tick is None:
             raise SystemExit(f"MT5 symbol data unavailable for {symbol}")
 
         volume = _volume_min(symbol_info)
-        payload = _build_order_payload(mt5, settings, symbol, symbol_info, tick, volume)
         print(f"selected_symbol={symbol}")
+        print(f"symbol_filling_mode={getattr(symbol_info, 'filling_mode', '')}")
+        print(f"symbol_trade_execution={getattr(symbol_info, 'trade_execution', '')}")
         print(f"volume_min={volume}")
+        print(f"volume_step={getattr(symbol_info, 'volume_step', '')}")
+        preview_payload = _build_order_payload(mt5, settings, symbol, symbol_info, tick, volume, filling_mode=0)
         print(f"order_type=BUY market demo")
-        print(f"price={payload.get('price')}")
-        print(f"stop_loss={payload.get('sl')}")
-        print(f"take_profit={payload.get('tp')}")
+        print(f"price={preview_payload.get('price')}")
+        print(f"stop_loss={preview_payload.get('sl')}")
+        print(f"take_profit={preview_payload.get('tp')}")
         print("warning=Deriv-Demo only; no real-money order is allowed")
         print(f"TYPE {CONFIRMATION_TEXT} TO CONFIRM")
         if input("confirmation: ").strip() != CONFIRMATION_TEXT:
             print("confirmation=cancelled; no order sent")
             return
 
-        result = mt5.order_send(payload)
-        _print_order_response(mt5, result)
+        _send_with_supported_filling_mode(mt5, settings, symbol, symbol_info, tick, volume)
     finally:
         if connected:
             shutdown = getattr(mt5, "shutdown", None)
             if callable(shutdown):
                 shutdown()
             print("mt5_connection=closed")
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Place one tiny confirmed Deriv-Demo MT5 order.")
+    parser.add_argument("--symbol", default="EURUSD", help="MT5 symbol to test, default: EURUSD when available.")
+    return parser.parse_args()
 
 
 def _ensure_deriv_demo_safe_mode(settings: AppSettings) -> None:
@@ -167,7 +178,15 @@ def _available_symbol_names(mt5: object) -> list[str]:
     return sorted(name for name in names if name)
 
 
-def _choose_demo_symbol(mt5: object, symbols: list[str]) -> str:
+def _choose_demo_symbol(mt5: object, symbols: list[str], *, requested_symbol: str | None = None) -> str:
+    if requested_symbol:
+        requested = _canonical_symbol(requested_symbol)
+        matches = [symbol for symbol in symbols if _canonical_symbol(symbol) == requested]
+        matches.extend(symbol for symbol in symbols if requested in _canonical_symbol(symbol) and symbol not in matches)
+        for symbol in sorted(matches, key=lambda value: (len(value), value)):
+            if _symbol_is_usable(mt5, symbol):
+                return symbol
+        print(f"requested_symbol_unavailable={requested_symbol}; falling back to preferred demo symbols")
     for preferred in PREFERRED_FOREX_SYMBOLS:
         matches = [symbol for symbol in symbols if preferred in _canonical_symbol(symbol)]
         for symbol in sorted(matches, key=lambda value: (not _canonical_symbol(value).endswith(preferred), len(value), value)):
@@ -202,7 +221,16 @@ def _volume_min(symbol_info: object) -> float:
     return value
 
 
-def _build_order_payload(mt5: object, settings: AppSettings, symbol: str, symbol_info: object, tick: object, volume: float) -> dict[str, object]:
+def _build_order_payload(
+    mt5: object,
+    settings: AppSettings,
+    symbol: str,
+    symbol_info: object,
+    tick: object,
+    volume: float,
+    *,
+    filling_mode: int,
+) -> dict[str, object]:
     digits = int(getattr(symbol_info, "digits", 5) or 5)
     point = float(getattr(symbol_info, "point", 0.0) or 0.0)
     ask = float(getattr(tick, "ask", 0.0) or 0.0)
@@ -226,18 +254,81 @@ def _build_order_payload(mt5: object, settings: AppSettings, symbol: str, symbol
         "magic": settings.broker.magic_number,
         "comment": f"{settings.broker.comment_prefix}:deriv-demo"[:31],
         "type_time": getattr(mt5, "ORDER_TIME_GTC"),
-        "type_filling": _filling_mode(mt5, symbol_info),
+        "type_filling": filling_mode,
     }
 
 
-def _filling_mode(mt5: object, symbol_info: object) -> int:
-    raw = getattr(symbol_info, "filling_mode", None)
-    if raw is not None:
+def get_supported_filling_modes(mt5: object, symbol_info: object) -> list[tuple[str, int]]:
+    """Return MT5 filling modes to try for this symbol without calling MT5."""
+
+    modes: list[tuple[str, int]] = []
+    for label, attr_name in (
+        ("IOC", "ORDER_FILLING_IOC"),
+        ("FOK", "ORDER_FILLING_FOK"),
+        ("RETURN", "ORDER_FILLING_RETURN"),
+    ):
+        raw = getattr(mt5, attr_name, None)
+        if raw is None:
+            continue
         try:
-            return int(raw)
+            mode = int(raw)
         except (TypeError, ValueError):
-            pass
-    return int(getattr(mt5, "ORDER_FILLING_RETURN", getattr(mt5, "ORDER_FILLING_FOK", 0)))
+            continue
+        if (label, mode) not in modes:
+            modes.append((label, mode))
+    symbol_mode = getattr(symbol_info, "filling_mode", None)
+    if symbol_mode is not None:
+        print(f"symbol_info_filling_mode_raw={symbol_mode}")
+    return modes
+
+
+def _send_with_supported_filling_mode(
+    mt5: object,
+    settings: AppSettings,
+    symbol: str,
+    symbol_info: object,
+    tick: object,
+    volume: float,
+) -> None:
+    modes = get_supported_filling_modes(mt5, symbol_info)
+    if not modes:
+        print("No compatible filling mode found for this symbol")
+        return
+    success_codes = _success_retcodes(mt5)
+    for label, mode in modes:
+        print(f"trying_filling_mode={label} value={mode}")
+        payload = _build_order_payload(mt5, settings, symbol, symbol_info, tick, volume, filling_mode=mode)
+        result = mt5.order_send(payload)
+        _print_order_response(mt5, result)
+        retcode = _retcode(result)
+        if retcode in success_codes:
+            print(f"filling_mode_used={label}")
+            return
+        if retcode == UNSUPPORTED_FILLING_RETCODE:
+            continue
+        return
+    print("No compatible filling mode found for this symbol")
+
+
+def _success_retcodes(mt5: object) -> set[int]:
+    values = [
+        getattr(mt5, "TRADE_RETCODE_DONE", 10009),
+        getattr(mt5, "TRADE_RETCODE_PLACED", 10008),
+        getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", None),
+    ]
+    return {int(value) for value in values if value is not None}
+
+
+def _retcode(result: object | None) -> int | None:
+    if result is None:
+        return None
+    raw = getattr(result, "retcode", None)
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def _print_order_response(mt5: object, result: object | None) -> None:
