@@ -15,6 +15,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import TypeVar
 
+from app.config.safety import DemoSafetyError, ensure_broker_live_disabled
 from app.config.settings import AppSettings
 from app.core.types import DirectionBias
 from app.execution.broker import BrokerExecutionError, append_broker_transition
@@ -27,6 +28,10 @@ class MT5BrokerExecutor:
     """Broker executor backed by a local MetaTrader 5 terminal."""
 
     def __init__(self, settings: AppSettings, *, mode: str) -> None:
+        try:
+            ensure_broker_live_disabled(settings, context="MT5 broker executor")
+        except DemoSafetyError as exc:
+            raise BrokerExecutionError(str(exc), BrokerErrorCategory.CONFIGURATION) from exc
         self.settings = settings
         self.mode = mode
         self._orders: dict[str, ExecutionOrder] = {}

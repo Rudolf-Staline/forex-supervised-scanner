@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+from app.config.safety import DemoSafetyError, ensure_broker_live_disabled
 from app.config.settings import AppSettings
 from app.execution.base import ExecutionAdapter
 from app.execution.models import (
@@ -244,6 +245,11 @@ class MockBrokerExecutor:
 
 def build_execution_adapter(settings: AppSettings) -> ExecutionAdapter:
     """Build the configured execution adapter without enabling live by accident."""
+
+    try:
+        ensure_broker_live_disabled(settings, context="execution adapter")
+    except DemoSafetyError as exc:
+        raise BrokerExecutionError(str(exc), BrokerErrorCategory.CONFIGURATION) from exc
 
     if settings.execution.mode in {"disabled", "paper"}:
         if settings.execution.mode == "paper" and not settings.execution_capabilities.paper_enabled:

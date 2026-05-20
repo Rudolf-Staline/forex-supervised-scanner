@@ -11,6 +11,16 @@ class DemoSafetyError(RuntimeError):
     """Raised when the runtime is not explicitly locked to paper/demo mode."""
 
 
+def ensure_broker_live_disabled(settings: AppSettings, *, context: str = "runtime") -> None:
+    """Refuse any live-broker capability for the local paper/demo MVP."""
+
+    reasons = _live_disabled_reasons(settings)
+    reasons.extend(_live_environment_reasons(settings))
+    if reasons:
+        detail = "; ".join(reasons)
+        raise DemoSafetyError(f"demo safety lock blocked {context}: {detail}")
+
+
 def ensure_demo_safe_mode(
     settings: AppSettings,
     *,
@@ -56,6 +66,8 @@ def _configuration_reasons(settings: AppSettings, *, require_paper_execution: bo
         reasons.append(f"safety.broker_mode must be paper, got {safety.broker_mode}")
     if safety.auto_bot_enabled:
         reasons.append("safety.auto_bot_enabled must remain false for the MVP")
+    if not safety.require_environment_lock:
+        reasons.append("safety.require_environment_lock must remain true for sensitive paths")
     if settings.execution.mode == "broker_live":
         reasons.append("execution.mode=broker_live is not allowed")
     if settings.execution_capabilities.broker_live_enabled:
@@ -69,8 +81,6 @@ def _configuration_reasons(settings: AppSettings, *, require_paper_execution: bo
 
 def _environment_reasons(settings: AppSettings) -> list[str]:
     safety = settings.safety
-    if not safety.require_environment_lock:
-        return []
     checks = [
         (safety.execution_mode_env, "paper"),
         (safety.allow_live_trading_env, "false"),
@@ -85,6 +95,30 @@ def _environment_reasons(settings: AppSettings) -> list[str]:
             continue
         if actual.strip().lower() != expected:
             reasons.append(f"{name} must be {expected}, got {actual}")
-    if os.getenv(settings.broker.live_confirmation_env):
-        reasons.append(f"{settings.broker.live_confirmation_env} must stay unset in MVP paper/demo mode")
+    reasons.extend(_live_environment_reasons(settings))
     return reasons
+
+
+def _live_disabled_reasons(settings: AppSettings) -> list[str]:
+    safety = settings.safety
+    reasons: list[str] = []
+    if settings.execution.mode == "broker_live":
+        reasons.append("execution.mode=broker_live is not allowed in the MVP")
+    if settings.execution_capabilities.broker_live_enabled:
+        reasons.append("execution_capabilities.broker_live_enabled must remain false")
+    if settings.broker.live_enabled:
+        reasons.append("broker.live_enabled must remain false")
+    if safety.execution_mode == "broker_live":
+        reasons.append("safety.execution_mode=broker_live is not allowed")
+    if safety.broker_mode == "broker_live":
+        reasons.append("safety.broker_mode=broker_live is not allowed")
+    if safety.allow_live_trading:
+        reasons.append("safety.allow_live_trading must remain false")
+    return reasons
+
+
+def _live_environment_reasons(settings: AppSettings) -> list[str]:
+    raw = os.getenv(settings.broker.live_confirmation_env)
+    if raw is not None and raw.strip():
+        return [f"{settings.broker.live_confirmation_env} must stay unset in MVP paper/demo mode"]
+    return []

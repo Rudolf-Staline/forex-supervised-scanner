@@ -315,8 +315,42 @@ def test_live_capability_gate_blocks_adapter_when_disabled(settings) -> None:
     adjusted.broker.live_enabled = True
     adjusted.execution_capabilities.broker_live_enabled = False
 
-    with pytest.raises(BrokerExecutionError, match="broker_live capability"):
+    with pytest.raises(BrokerExecutionError, match="broker_live"):
         build_execution_adapter(adjusted)
+
+
+def test_mvp_safety_blocks_broker_live_adapter_even_when_gates_enabled(settings, monkeypatch) -> None:
+    adjusted = settings.model_copy(deep=True)
+    adjusted.execution.mode = "broker_live"
+    adjusted.broker.provider = "mt5"
+    adjusted.broker.live_enabled = True
+    adjusted.execution_capabilities.broker_live_enabled = True
+    monkeypatch.setenv(adjusted.broker.live_confirmation_env, adjusted.broker.live_confirmation_value)
+
+    with pytest.raises(BrokerExecutionError, match="demo safety lock blocked execution adapter"):
+        build_execution_adapter(adjusted)
+
+
+def test_mvp_safety_blocks_broker_execution_service_live_mode(settings) -> None:
+    adjusted = settings.model_copy(deep=True)
+    adjusted.execution.mode = "broker_live"
+    adjusted.broker.provider = "mt5"
+    adjusted.broker.live_enabled = True
+    adjusted.execution_capabilities.broker_live_enabled = True
+    adapter = MockBrokerExecutor(adjusted, mode="broker_live")
+
+    with pytest.raises(BrokerExecutionError, match="broker execution service"):
+        BrokerExecutionService(adjusted, adapter=adapter)
+
+
+def test_mvp_safety_blocks_direct_mt5_live_executor(settings) -> None:
+    adjusted = settings.model_copy(deep=True)
+    adjusted.execution.mode = "broker_live"
+    adjusted.broker.live_enabled = True
+    adjusted.execution_capabilities.broker_live_enabled = True
+
+    with pytest.raises(BrokerExecutionError, match="MT5 broker executor"):
+        MT5BrokerExecutor(adjusted, mode="broker_live")
 
 
 def test_broker_execution_service_journals_validation_failures(settings) -> None:

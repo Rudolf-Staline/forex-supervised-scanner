@@ -6,12 +6,13 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from app.config.safety import DemoSafetyError, ensure_broker_live_disabled
 from app.config.settings import AppSettings
 from app.core.types import DirectionBias, Opportunity, OpportunityStatus
 from app.execution.base import ExecutionAdapter
-from app.execution.broker import append_broker_transition, build_execution_adapter
+from app.execution.broker import BrokerExecutionError, append_broker_transition, build_execution_adapter
 from app.execution.broker_validation import BrokerPreTradeValidator, BrokerValidationContext
-from app.execution.models import BrokerOrderState, ExecutionOrder, OrderRequest, OrderStatus, TradeEventType
+from app.execution.models import BrokerErrorCategory, BrokerOrderState, ExecutionOrder, OrderRequest, OrderStatus, TradeEventType
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,10 @@ class BrokerExecutionService:
         validator: BrokerPreTradeValidator | None = None,
     ) -> None:
         self.settings = settings
+        try:
+            ensure_broker_live_disabled(settings, context="broker execution service")
+        except DemoSafetyError as exc:
+            raise BrokerExecutionError(str(exc), BrokerErrorCategory.CONFIGURATION) from exc
         self.adapter = adapter or build_execution_adapter(settings)
         self.validator = validator or BrokerPreTradeValidator(settings)
 

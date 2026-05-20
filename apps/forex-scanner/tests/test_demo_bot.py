@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -23,8 +23,10 @@ from app.core.types import (
     TradingStyle,
 )
 from app.execution.demo_bot import DemoBotService
+from app.execution.demo_bot_state import DemoBotRuntimeState
 from app.execution.models import TradeEventType
 from app.execution.operations import OperatorControlState
+from app.paper.trading import close_paper_order_manually, submit_signal_to_paper
 from app.storage.database import Database
 
 
@@ -171,6 +173,109 @@ def test_degraded_mode_blocks_and_logs_decision(settings, database, monkeypatch:
     assert "operator degraded mode is active" in result.decisions[0].reasons
     assert any("degraded mode is active" in line for line in result.logs)
     assert any(event.event_type == TradeEventType.DEMO_BOT_DECISION_REJECTED for event in database.load_trade_events())
+
+
+def test_score_rr_data_quality_and_missing_levels_are_blocked(settings, database, monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeScannerService.opportunities = [
+        _opportunity(symbol="EUR/USD", score=70.0, final_score=70.0),
+        _opportunity(symbol="GBP/USD", risk_reward=1.0),
+        _opportunity(
+            symbol="USD/CHF",
+            data_quality=DataQualityDiagnostic(score=40.0, missing_bars=8, stale_minutes=0.0, spread_available=True, resampled=False),
+        ),
+        _opportunity(symbol="AUD/USD", entry=None),
+    ]
+    monkeypatch.setattr(demo_bot_module, "ScannerService", FakeScannerService)
+
+    result = DemoBotService(settings, object(), database).run_cycle(TradingStyle.DAY_TRADING, ["EUR/USD", "GBP/USD", "USD/CHF", "AUD/USD"])
+    reasons = [reason for decision in result.decisions for reason in decision.reasons]
+
+    assert result.orders_created == 0
+    assert any("score 70.0 below minimum 75.0" in reason for reason in reasons)
+    assert any("risk/reward 1.00 below minimum 1.50" in reason for reason in reasons)
+    assert any("data quality 40.0 below paper-entry threshold 60.0" in reason for reason in reasons)
+    assert any("missing executable levels: entry" in reason for reason in reasons)
+    assert all(any(f"REJECT {decision.symbol}" in line for line in result.logs) for decision in result.decisions)
+
+
+def test_incoherent_take_profits_are_blocked(settings, database, monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeScannerService.opportunities = [
+        _opportunity(symbol="EUR/USD", take_profit=1.0990, tp1=1.0990, tp2=1.0980, tp3=1.0970)
+    ]
+    monkeypatch.setattr(demo_bot_module, "ScannerService", FakeScannerService)
+
+    result = DemoBotService(settings, object(), database).run_cycle(TradingStyle.DAY_TRADING, ["EUR/USD"])
+    reasons = result.decisions[0].reasons
+
+    assert result.orders_created == 0
+    assert "take profit must be above entry for a long setup" in reasons
+    assert "tp1 must be above entry for a long setup" in reasons
+    assert "tp2 must be above entry for a long setup" in reasons
+    assert "tp3 must be above entry for a long setup" in reasons
+
+
+def test_daily_trade_cap_blocks_new_bot_trade(settings, database, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUTO_BOT_MAX_TRADES_PER_DAY", "1")
+    submission = submit_signal_to_paper(_opportunity(symbol="EUR/USD"), settings=settings, database=database, source="demo_bot")
+    assert submission.order is not None
+    close_paper_order_manually(submission.order, settings=settings, database=database, exit_price=1.1010)
+    FakeScannerService.opportunities = [_opportunity(symbol="GBP/USD")]
+    monkeypatch.setattr(demo_bot_module, "ScannerService", FakeScannerService)
+
+    result = DemoBotService(settings, object(), database).run_cycle(TradingStyle.DAY_TRADING, ["GBP/USD"])
+
+    assert result.orders_created == 0
+    assert "daily trade cap 1 reached" in result.decisions[0].reasons
+    assert any("daily trade cap 1 reached" in line for line in result.logs)
+
+
+def test_cooldown_blocks_recent_symbol_even_after_close(settings, database, monkeypatch: pytest.MonkeyPatch) -> None:
+    submission = submit_signal_to_paper(_opportunity(symbol="EUR/USD"), settings=settings, database=database, source="demo_bot")
+    assert submission.order is not None
+    closed = close_paper_order_manually(submission.order, settings=settings, database=database, exit_price=1.1010)
+    assert closed.closed_at is not None and datetime.now(timezone.utc) - closed.closed_at < timedelta(minutes=30)
+    FakeScannerService.opportunities = [_opportunity(symbol="EUR/USD")]
+    monkeypatch.setattr(demo_bot_module, "ScannerService", FakeScannerService)
+
+    result = DemoBotService(settings, object(), database).run_cycle(TradingStyle.DAY_TRADING, ["EUR/USD"])
+
+    assert result.orders_created == 0
+    assert "cooldown active for EUR/USD" in result.decisions[0].reasons
+
+
+def test_maintenance_mode_blocks_and_logs_decision(settings, database, monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeScannerService.opportunities = [_opportunity()]
+    monkeypatch.setattr(demo_bot_module, "ScannerService", FakeScannerService)
+    database.save_operator_controls(OperatorControlState(updated_at=datetime.now(timezone.utc), maintenance_mode=True))
+
+    result = DemoBotService(settings, object(), database).run_cycle(TradingStyle.DAY_TRADING, ["EUR/USD"])
+
+    assert result.orders_created == 0
+    assert "operator maintenance mode is active" in result.decisions[0].reasons
+    assert any("maintenance mode is active" in line for line in result.logs)
+    assert any(event.event_type == TradeEventType.DEMO_BOT_DECISION_REJECTED for event in database.load_trade_events())
+
+
+def test_cycle_always_persists_started_and_completed_audit_events(settings, database, monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeScannerService.opportunities = []
+    monkeypatch.setattr(demo_bot_module, "ScannerService", FakeScannerService)
+
+    result = DemoBotService(settings, object(), database).run_cycle(TradingStyle.DAY_TRADING, ["EUR/USD"])
+    events = database.load_trade_events(result.cycle_id)
+
+    assert result.orders_created == 0
+    assert [event.event_type for event in events] == [
+        TradeEventType.DEMO_BOT_CYCLE_STARTED,
+        TradeEventType.DEMO_BOT_CYCLE_COMPLETED,
+    ]
+
+
+def test_demo_bot_runtime_state_is_stopped_by_default() -> None:
+    state = DemoBotRuntimeState()
+
+    assert state.status == "STOPPED"
+    assert not state.running
+    assert not state.due_for_cycle(300)
 
 
 def _opportunity(

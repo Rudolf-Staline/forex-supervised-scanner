@@ -80,6 +80,35 @@ def test_auto_provider_tries_mt5_then_yahoo_before_synthetic() -> None:
     assert "Yahoo fallback" in df.attrs["warning"]
 
 
+def test_auto_provider_can_fallback_to_synthetic_demo_data() -> None:
+    provider = AutoFallbackProvider(
+        primary=_FailingProvider(),
+        secondary=_FailingProvider(),
+        fallback=SyntheticForexDataProvider(ProviderSettings(name="synthetic", max_bars=220)),
+    )
+
+    df = provider.get_ohlcv("EUR/USD", Timeframe.M15, end=datetime(2025, 1, 15, 14, tzinfo=timezone.utc))
+
+    assert df.attrs["provider"] == "synthetic"
+    assert df.attrs["scenario"] == "trend_up_pullback"
+    assert "deterministic development candles" in df.attrs["warning"]
+    assert "Do not treat fallback candles as broker-quality market data" in df.attrs["warning"]
+
+
+def test_synthetic_provider_is_deterministic_and_marked_as_demo_data() -> None:
+    provider = SyntheticForexDataProvider(ProviderSettings(name="synthetic", max_bars=220))
+    end = datetime(2025, 1, 15, 14, tzinfo=timezone.utc)
+
+    first = provider.get_ohlcv("GBP/USD", Timeframe.M15, end=end)
+    second = provider.get_ohlcv("GBP/USD", Timeframe.M15, end=end)
+
+    assert first[["open", "high", "low", "close", "spread"]].equals(second[["open", "high", "low", "close", "spread"]])
+    assert first.attrs["provider"] == "synthetic"
+    assert first.attrs["scenario"] == "breakout_candidate"
+    assert "deterministic development candles" in first.attrs["warning"]
+    assert "Configure Yahoo or MT5 for market data" in first.attrs["warning"]
+
+
 def test_synthetic_provider_is_blocked_by_production_config() -> None:
     with pytest.raises(ValueError, match="synthetic provider is disabled in production"):
         ProviderSettings(name="synthetic", environment="production", fallback_to_synthetic=False)

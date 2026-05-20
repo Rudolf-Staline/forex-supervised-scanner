@@ -1,65 +1,49 @@
 # Forex Supervisor
 
-Forex Supervisor est une application locale d'aide à l'analyse Forex avec scanner multi-timeframe, scoring, paper trading, bot demo, journal de trading, backtest simplifié et audit/logs locaux.
+Forex Supervisor est une application locale d'aide à l'analyse Forex. Elle regroupe un scanner multi-timeframe, un scoring de setups, du paper trading, un bot demo, un journal, un backtest simplifié et des rapports d'audit locaux.
 
-Le projet se lance depuis `apps/forex-scanner` et reste centré sur une démonstration locale en mode paper/demo.
+Le projet se lance depuis `apps/forex-scanner` et doit rester en mode `paper/demo`.
 
 ## Avertissement
 
 - Forex Supervisor est un outil éducatif et de recherche.
-- Ce projet ne fournit pas de conseil financier.
-- Le mode par défaut est `paper/demo`.
+- Le projet fonctionne en paper/demo uniquement par défaut.
+- Il ne fournit pas de conseil financier.
 - Aucun ordre réel n'est envoyé dans le mode actuel.
 - Le trading Forex est risqué et peut entraîner des pertes importantes.
-- Toute logique broker/live doit rester désactivée tant que des garde-fous explicites et supervisés ne sont pas activés.
+- Le broker live est désactivé et ne doit pas être utilisé pour cette version.
 
-## Fonctionnalités
+## Prérequis
 
-- Scanner Forex multi-timeframe.
-- Détection de régimes de marché.
-- Détection de setups techniques.
-- Scoring des opportunités.
-- Calcul risk/reward avec entry, stop loss, TP1, TP2 et TP3.
-- Opportunités classées par statut : `rejected`, `detected`, `watchlist`, `approved`, `premium`.
-- Paper trading manuel depuis l'interface Streamlit.
-- Bot demo automatique, désactivé par défaut et lancé uniquement par action utilisateur.
-- Journal de trading pour annoter les trades paper/demo.
-- Backtest simplifié accessible depuis Streamlit.
-- Rapports, audit events et logs SQLite.
-- Verrou de sécurité centralisé pour bloquer le live trading.
+Python 3.11 ou 3.12 est recommandé.
 
-## Installation
+Ouvrir un terminal dans :
 
-Créer un environnement virtuel :
+```text
+apps/forex-scanner
+```
+
+## Installation Windows PowerShell
 
 ```powershell
 python -m venv .venv
-```
-
-Activer l'environnement sur Windows PowerShell :
-
-```powershell
 .\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
-Activer l'environnement sur Linux ou macOS :
+## Installation Linux / Mac
 
 ```bash
+python -m venv .venv
 source .venv/bin/activate
-```
-
-Installer les dépendances :
-
-```powershell
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -e ".[dev]"
 ```
 
-Python 3.11 ou 3.12 est recommandé pour éviter les incompatibilités de dépendances avec Python 3.13.
+## Variables D'environnement Obligatoires
 
-## Configuration Demo
-
-Avant de lancer l'application ou les scripts sensibles, verrouiller explicitement le mode paper/demo.
+Ces variables verrouillent explicitement l'application en mode paper/demo. Elles doivent être définies avant de lancer l'application ou les scripts sensibles.
 
 Windows PowerShell :
 
@@ -70,7 +54,7 @@ $env:BROKER_MODE="paper"
 $env:AUTO_BOT_ENABLED="false"
 ```
 
-Linux ou macOS :
+Linux / Mac :
 
 ```bash
 export EXECUTION_MODE=paper
@@ -79,148 +63,7 @@ export BROKER_MODE=paper
 export AUTO_BOT_ENABLED=false
 ```
 
-Configuration optionnelle du bot demo :
-
-```powershell
-$env:AUTO_BOT_INTERVAL_SECONDS="300"
-$env:AUTO_BOT_MIN_SCORE="75"
-$env:AUTO_BOT_ALLOWED_STATUSES="approved,premium"
-$env:AUTO_BOT_MAX_OPEN_TRADES="3"
-$env:AUTO_BOT_MAX_TRADES_PER_DAY="5"
-$env:AUTO_BOT_COOLDOWN_MINUTES="30"
-$env:AUTO_BOT_MIN_RR="1.5"
-```
-
-## Initialisation
-
-Initialiser la base SQLite locale :
-
-```powershell
-python scripts/init_db.py
-```
-
-Vérifier rapidement le scanner, la configuration et un backtest minimal :
-
-```powershell
-python scripts/smoke_check.py
-```
-
-## Lancement
-
-Lancer l'application Streamlit :
-
-```powershell
-streamlit run streamlit_app.py
-```
-
-L'application affiche un état système avec :
-
-- database OK ;
-- data provider OK ou fallback ;
-- paper mode actif ;
-- bot demo `STOPPED` ou `RUNNING` ;
-- live trading disabled.
-
-## Parcours Utilisateur
-
-1. Lancer l'application avec `streamlit run streamlit_app.py`.
-2. Ouvrir l'onglet `Scanner`.
-3. Choisir un style : scalping, day trading ou swing trading.
-4. Sélectionner une ou plusieurs paires Forex.
-5. Cliquer sur `Lancer le scan`.
-6. Ouvrir l'onglet `Opportunités`.
-7. Lire l'explication d'une opportunité, son score, son régime de marché, son risk/reward et ses niveaux.
-8. Si l'opportunité est `approved` ou `premium`, cliquer sur `Ajouter en paper trading`.
-9. Ouvrir `Paper Trading` pour voir les positions ouvertes, les positions fermées, les notes et les événements.
-10. Ouvrir `Bot Demo` et cliquer sur `Run one cycle` pour exécuter un cycle demo paper uniquement.
-11. Ouvrir `Journal` pour ajouter tags, émotion, leçon et notes.
-12. Ouvrir `Backtest` pour lancer un backtest simplifié sur une paire, un style et une période.
-13. Ouvrir `Rapports / Audit` pour consulter le verrou paper/demo et exporter les rapports disponibles.
-
-## Bot Demo
-
-Le bot demo est désactivé par défaut.
-
-Il ne démarre jamais automatiquement au lancement de Streamlit. L'utilisateur doit cliquer sur `Start Demo Bot` ou `Run one cycle`.
-
-Le bot exécute uniquement des trades paper/demo. Il bloque les signaux `rejected`, `detected` et `watchlist`, ainsi que les signaux qui échouent aux garde-fous de score, risk/reward, data quality, stop loss, take profit, cooldown, limites journalières ou limites de positions ouvertes.
-
-## Journal
-
-Le journal permet de relire les trades paper/demo et d'ajouter :
-
-- source : `manual` ou `demo_bot` ;
-- résultat : open, win, loss ou breakeven ;
-- PnL en R ;
-- tags d'erreur ou de bonne exécution ;
-- leçon ;
-- émotion ;
-- notes.
-
-Tags disponibles :
-
-- entrée trop tôt ;
-- mauvais contexte ;
-- stop mal placé ;
-- bon setup ;
-- signal faible ;
-- non-respect du plan ;
-- trade impulsif ;
-- bonne patience.
-
-## Backtest
-
-Le backtest existant est accessible depuis Streamlit.
-
-Il permet de choisir :
-
-- paire ;
-- style ;
-- période ;
-- score minimum ;
-- capital initial fictif ;
-- risque par trade fictif.
-
-Les résultats affichent notamment :
-
-- nombre de trades ;
-- win rate ;
-- profit factor ;
-- expectancy ;
-- max drawdown ;
-- average R ;
-- setup families les plus performantes ;
-- meilleurs et pires trades simulés.
-
-Le backtest est simplifié. Les résultats passés ne garantissent aucune performance future.
-
-## Commandes De Test
-
-Lancer toute la suite de tests :
-
-```powershell
-python -m pytest
-```
-
-Lancer le smoke test :
-
-```powershell
-python scripts/smoke_check.py
-```
-
-Commandes utiles supplémentaires :
-
-```powershell
-python scripts/journal_export.py --db data/forex_scanner.sqlite --out reports/journal
-python scripts/paper_report.py --db data/forex_scanner.sqlite --out reports/paper
-python scripts/calibration_report.py --db data/forex_scanner.sqlite --out reports/calibration
-```
-
-## Sécurité
-
-Le verrou de sécurité central bloque le live trading si les variables et la configuration ne confirment pas explicitement le mode paper/demo.
-
-Valeurs attendues pour la démonstration :
+Valeurs attendues :
 
 ```text
 EXECUTION_MODE=paper
@@ -229,12 +72,100 @@ BROKER_MODE=paper
 AUTO_BOT_ENABLED=false
 ```
 
-Dans l'état actuel du projet, aucun broker live ne doit être connecté et aucun ordre réel ne doit être envoyé.
+## Initialisation
 
-## Roadmap
+Créer ou mettre à jour la base SQLite locale :
 
-- Amélioration de la calibration.
-- Meilleur dashboard Streamlit.
-- Meilleure gestion portfolio paper/demo.
-- Sandbox broker supervisé plus tard.
-- Jamais de live trading sans garde-fous explicites, tests de sécurité et validation opérateur.
+```powershell
+python scripts/init_db.py
+```
+
+Lancer le smoke test local :
+
+```powershell
+python scripts/smoke_check.py
+```
+
+Le smoke test vérifie la configuration, le scanner et un backtest minimal avec des données de démonstration déterministes.
+
+## Lancement
+
+```powershell
+streamlit run streamlit_app.py
+```
+
+L'interface Streamlit affiche l'état du système :
+
+- database OK ;
+- data provider OK ou fallback ;
+- paper mode actif ;
+- bot demo stopped/running ;
+- live trading disabled.
+
+## Parcours De Démo
+
+1. Ouvrir Streamlit avec `streamlit run streamlit_app.py`.
+2. Aller dans `Scanner`.
+3. Choisir un style : scalping, day trading ou swing trading.
+4. Sélectionner une ou plusieurs paires Forex.
+5. Cliquer sur `Lancer le scan`.
+6. Aller dans `Opportunités`.
+7. Lire le statut, le score, le régime de marché, le setup, le risk/reward, l'entry, le stop loss et les TP.
+8. Envoyer une opportunité `approved` ou `premium` en paper trading.
+9. Aller dans `Paper Trading` pour consulter les trades paper.
+10. Aller dans `Bot Demo` et cliquer sur `Run one cycle`.
+11. Consulter les logs et décisions du bot demo.
+12. Aller dans `Journal` pour ajouter des notes, tags, émotion ou leçon.
+13. Aller dans `Backtest` pour lancer un backtest simple.
+14. Aller dans `Rapports / Audit` pour consulter les événements, exports et informations de sécurité.
+
+## Onglets Disponibles
+
+- `Scanner` : scan Forex multi-timeframe.
+- `Opportunités` : setups classés et explications des statuts.
+- `Paper Trading` : trades simulés, positions ouvertes/fermées et événements.
+- `Bot Demo` : bot paper/demo, désactivé par défaut, lancé uniquement par action utilisateur.
+- `Journal` : notes, tags, leçons, émotions et suivi des résultats paper.
+- `Backtest` : simulation historique simplifiée.
+- `Rapports / Audit` : sécurité, événements et exports locaux.
+
+## Données Synthétiques De Démo
+
+Le provider `synthetic` permet une démonstration locale reproductible sans broker externe. Ces données sont déterministes et servent uniquement à tester le scanner, le bot demo et le backtest.
+
+Elles ne sont pas des données de marché réelles et ne doivent jamais être présentées comme telles.
+
+Le provider `auto` reste disponible : en développement, si MT5 puis Yahoo sont indisponibles et si le fallback est autorisé, l'application peut utiliser les données synthétiques de démonstration. Yahoo et MT5 ne sont pas désactivés.
+
+Scénario reproductible :
+
+```powershell
+python scripts/smoke_check.py --symbols EUR/USD GBP/USD USD/CHF
+```
+
+La sortie doit indiquer `deterministic_provider=synthetic`, un scan avec des opportunités diagnostiquées, puis `backtest=ok`.
+
+## Tests
+
+Lancer toute la suite :
+
+```powershell
+python -m pytest
+```
+
+Commandes de vérification rapides :
+
+```powershell
+python scripts/init_db.py
+python scripts/smoke_check.py
+python -m pytest
+```
+
+## Limites
+
+- Le backtest est simplifié.
+- Des données synthétiques peuvent être utilisées en démo.
+- Les résultats passés ou simulés ne garantissent aucune performance future.
+- Le broker live est désactivé.
+- Aucun ordre réel ne doit être envoyé dans l'état actuel du projet.
+- Toute future intégration broker devra nécessiter des garde-fous explicites, des tests de sécurité et une validation opérateur.

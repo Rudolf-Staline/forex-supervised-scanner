@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import copy
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -36,7 +36,7 @@ def main() -> None:
     """Run the Streamlit app."""
 
     configure_logging()
-    st.set_page_config(page_title="Forex TA Scanner", layout="wide")
+    st.set_page_config(page_title="Forex Supervisor", layout="wide")
     settings = _load_settings()
     _ensure_safe_mode(settings)
     database = _database(settings)
@@ -127,8 +127,9 @@ def _system_status_panel(settings: AppSettings, database: Database, provider: Ma
     cols[2].metric("Paper mode", "actif" if paper_mode else "bloque")
     cols[3].metric("Bot demo", bot_status)
     cols[4].metric("Live trading", "disabled" if live_disabled else "blocked")
-    with st.expander("Details demo", expanded=False):
-        st.write("Flux de demo: Scanner -> Opportunites -> Ajouter en paper trading -> Bot Demo -> Journal -> Backtest -> Rapports / Audit.")
+    with st.expander("Parcours demo et configuration", expanded=False):
+        st.write("Flux conseillé: Scanner -> Opportunités -> Ajouter en paper trading -> Bot Demo -> Journal -> Backtest -> Rapports / Audit.")
+        st.caption("Si aucun trade n'est créé, consultez les raisons de rejet dans Opportunités ou les logs du Bot Demo.")
         st.json(
             {
                 "database_path": str(database.path),
@@ -217,7 +218,7 @@ def _opportunities_page(settings: AppSettings, provider: MarketDataProvider, dat
     st.caption("Lisez le score, les niveaux et la raison du statut avant tout ajout en paper trading.")
     report = st.session_state.get("last_scan_report")
     if report is None or not report.opportunities:
-        st.info("Lancez un scan pour afficher les setups.")
+        st.info("Lancez d'abord un scan dans l'onglet Scanner pour afficher les setups classés.")
         return
 
     opportunities = _ranked_opportunities(report.opportunities)
@@ -237,6 +238,7 @@ def _opportunities_page(settings: AppSettings, provider: MarketDataProvider, dat
 def _paper_submit_panel(settings: AppSettings, database: Database, opportunity: Opportunity) -> None:
     executable = opportunity.status in {OpportunityStatus.APPROVED, OpportunityStatus.PREMIUM}
     if executable:
+        st.caption("Ce setup est éligible au paper trading local. Aucun ordre réel ne sera envoyé.")
         notes = st.text_area("Notes paper", key=f"paper_notes_{opportunity.symbol}_{opportunity.setup_subtype.value}", height=80)
         if st.button("Ajouter en paper trading", type="primary", key=f"paper_send_{opportunity.symbol}_{opportunity.setup_subtype.value}"):
             try:
@@ -262,6 +264,9 @@ def _paper_trading_page(settings: AppSettings, database: Database) -> None:
     events = database.load_trade_events()
     open_orders = [order for order in orders if order.is_open]
     closed_orders = [order for order in orders if not order.is_open]
+
+    if not orders and not blocks:
+        st.info("Aucun trade paper pour le moment. Ajoutez un setup approved/premium depuis Opportunités ou lancez Run one cycle dans Bot Demo.")
 
     metric_cols = st.columns(4)
     metric_cols[0].metric("Ouvertes", len(open_orders))
@@ -342,7 +347,7 @@ def _bot_demo_page(settings: AppSettings, provider: MarketDataProvider, database
         try:
             with st.spinner("Premier cycle demo paper en cours..."):
                 result = _run_demo_bot_cycle(settings, provider, database, style, symbols)
-            st.success(f"Demo bot RUNNING. Premier cycle termine: {result.orders_created} trades paper crees.")
+            _show_demo_bot_cycle_result(result, prefix="Demo bot RUNNING. Premier cycle terminé")
         except Exception as exc:
             state = _state_with_logs(_demo_bot_state(), [f"Premier cycle impossible: {exc}"], level="error")
             _set_demo_bot_state(state)
@@ -356,7 +361,7 @@ def _bot_demo_page(settings: AppSettings, provider: MarketDataProvider, database
         try:
             with st.spinner("Cycle demo: scan, filtres, garde-fous, paper trading..."):
                 result = _run_demo_bot_cycle(settings, provider, database, style, symbols)
-            st.success(f"Cycle termine: {result.opportunities} setups, {result.orders_created} trades paper crees.")
+            _show_demo_bot_cycle_result(result, prefix="Cycle terminé")
         except Exception as exc:
             st.error(f"Cycle demo impossible: {exc}")
 
@@ -365,7 +370,7 @@ def _bot_demo_page(settings: AppSettings, provider: MarketDataProvider, database
         try:
             with st.spinner("Cycle automatique demo en cours..."):
                 result = _run_demo_bot_cycle(settings, provider, database, style, symbols)
-            st.success(f"Cycle auto termine: {result.orders_created} trades paper crees.")
+            _show_demo_bot_cycle_result(result, prefix="Cycle auto terminé")
         except Exception as exc:
             state = _state_with_logs(_demo_bot_state(), [f"Cycle auto impossible: {exc}"], level="error")
             _set_demo_bot_state(state)
@@ -396,6 +401,12 @@ def _demo_bot_state() -> DemoBotRuntimeState:
     state = DemoBotRuntimeState()
     st.session_state["demo_bot_state"] = state
     return state
+
+
+def _show_demo_bot_cycle_result(result: DemoBotCycleResult, *, prefix: str) -> None:
+    st.success(f"{prefix}: {result.opportunities} setups, {result.orders_created} trades paper créés.")
+    if result.orders_created == 0:
+        st.info("Aucun trade créé sur ce cycle. Les décisions ci-dessous indiquent les garde-fous ou critères qui ont bloqué les setups.")
 
 
 def _set_demo_bot_state(state: DemoBotRuntimeState) -> None:
@@ -536,6 +547,8 @@ def _journal_page(database: Database) -> None:
             database.rebuild_trading_journal()
             st.success("Journal mis a jour.")
             st.rerun()
+    else:
+        st.info("Le journal devient éditable dès qu'un trade paper existe. Commencez par ajouter un setup approved/premium en paper trading.")
 
     if st.button("Exporter CSV journal", key="journal_export_csv"):
         outputs = export_trading_journal(orders, blocks, Path("reports/journal"))
@@ -575,16 +588,21 @@ def _reports_audit_page(settings: AppSettings, database: Database) -> None:
             st.success("Journal exporté.")
             st.dataframe(_outputs_table(outputs), hide_index=True, width="stretch")
 
+    st.markdown("**Événements récents**")
+    _events_dataframe(events)
+
 
 def _backtest_page(settings: AppSettings, provider: MarketDataProvider, database: Database) -> None:
     st.subheader("Backtest")
     st.warning("Backtest simplifié. Les résultats passés ne garantissent aucune performance future.")
+    st.caption("La période par défaut est courte pour garder la démo interactive. Vous pouvez l'élargir après un premier test.")
     with st.form("backtest_form"):
         symbol = st.selectbox("Paire", settings.symbols, index=0, key="backtest_symbol")
         style = TradingStyle(
             st.selectbox(
                 "Style",
                 [style.value for style in TradingStyle],
+                index=[style.value for style in TradingStyle].index(TradingStyle.DAY_TRADING.value),
                 key="backtest_style",
                 format_func=lambda value: value.replace("_", " ").title(),
             )
@@ -594,7 +612,7 @@ def _backtest_page(settings: AppSettings, provider: MarketDataProvider, database
         setup_filter: SetupFamily | Literal["all"] = "all" if setup_value == "all" else SetupFamily(setup_value)
 
         today = date.today()
-        default_start = today.replace(year=today.year - 1)
+        default_start = today - timedelta(days=7)
         col_start, col_end = st.columns(2)
         with col_start:
             start_day = st.date_input("Début", value=default_start)
@@ -624,6 +642,7 @@ def _backtest_page(settings: AppSettings, provider: MarketDataProvider, database
 
     result = st.session_state.get("last_backtest_result")
     if result is None:
+        st.info("Renseignez le formulaire puis lancez Run backtest pour obtenir une simulation locale.")
         return
 
     active_min_score = float(st.session_state.get("last_backtest_min_score", 0.0))
@@ -1130,7 +1149,7 @@ def _outputs_table(outputs: dict[str, Path]) -> pd.DataFrame:
 def _opportunity_label(opportunity: Opportunity) -> str:
     if opportunity.raw_setup_family is None:
         return f"{opportunity.symbol}: {opportunity.status.value}"
-    if opportunity.status != OpportunityStatus.APPROVED:
+    if opportunity.status not in {OpportunityStatus.APPROVED, OpportunityStatus.PREMIUM}:
         if opportunity.raw_setup_family is None:
             return f"{opportunity.symbol}: no-trade"
         setup = opportunity.setup_subtype.value if opportunity.setup_subtype.value != "none" else opportunity.raw_setup_family.value
@@ -1145,6 +1164,7 @@ def _opportunity_details(opportunity: Opportunity) -> None:
     cols[1].metric("Status", opportunity.status.value)
     cols[2].metric("Direction", opportunity.direction.value)
     cols[3].metric("Final score", f"{(opportunity.final_score or opportunity.score):.1f}")
+    _status_explanation(opportunity)
 
     cols = st.columns(4)
     cols[0].metric("Entry", _fmt_price(opportunity.entry))
@@ -1206,6 +1226,17 @@ def _opportunity_details(opportunity: Opportunity) -> None:
             st.warning("Data quality: " + "; ".join(opportunity.data_quality.warnings))
     if opportunity.score_components:
         st.dataframe(pd.DataFrame([opportunity.score_components]), hide_index=True, width="stretch")
+
+
+def _status_explanation(opportunity: Opportunity) -> None:
+    messages = {
+        OpportunityStatus.PREMIUM: "Premium: score et qualité élevés. Le setup peut être ajouté en paper trading.",
+        OpportunityStatus.APPROVED: "Approved: les garde-fous principaux sont validés. Le setup peut être ajouté en paper trading.",
+        OpportunityStatus.WATCHLIST: "Watchlist: setup intéressant, mais une ou plusieurs conditions restent à confirmer.",
+        OpportunityStatus.DETECTED: "Detected: pattern repéré, mais score, RR ou qualité insuffisant pour exécution paper.",
+        OpportunityStatus.REJECTED: "Rejected: setup refusé par les garde-fous ou conditions de marché.",
+    }
+    st.info(messages.get(opportunity.status, "Statut informatif du scanner."))
 
 
 def _chart_panel(settings: AppSettings, provider: MarketDataProvider, opportunity: Opportunity) -> None:
