@@ -17,7 +17,12 @@ def main() -> None:
     add_cycle_arguments(parser)
     args = parser.parse_args()
 
-    settings, database, provider = load_demo_runtime("run_one_cycle.py", provider_name=args.provider, broker_mode=args.broker)
+    settings, database, provider = load_demo_runtime(
+        "run_one_cycle.py",
+        provider_name=args.provider,
+        broker_mode=args.broker,
+        debug_market_data=args.debug_market_data,
+    )
     style = TradingStyle(args.style)
     symbols = normalize_symbols(args.symbols)
     print(f"runtime provider={provider.name} broker={args.broker} mode=paper")

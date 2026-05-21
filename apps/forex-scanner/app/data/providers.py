@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,11 @@ from app.data.validation import attach_data_quality, pip_size, validate_ohlcv, w
 LOGGER = logging.getLogger(__name__)
 
 DemoScenario = Literal["trend_up_pullback", "breakout_candidate", "range_reversion"]
+MT5_LOGIN_ENV = "MT5_LOGIN"
+MT5_PASSWORD_ENV = "MT5_PASSWORD"
+MT5_SERVER_ENV = "MT5_SERVER"
+MT5_PATH_ENV = "MT5_PATH"
+DEBUG_MARKET_DATA_ENV = "FOREX_SCANNER_DEBUG_MARKET_DATA"
 
 
 class DataProviderError(RuntimeError):
@@ -71,7 +77,12 @@ class AutoFallbackProvider(MarketDataProvider):
             errors.append(f"{self.primary.name}: {exc}")
             LOGGER.warning(
                 "primary provider failed; trying secondary provider",
-                extra={"symbol": symbol, "timeframe": timeframe.value, "provider": self.primary.name},
+                extra={
+                    "symbol": symbol,
+                    "timeframe": timeframe.value,
+                    "provider": self.primary.name,
+                    "error": str(exc),
+                },
             )
 
         try:
@@ -296,36 +307,89 @@ class MetaTrader5Provider(MarketDataProvider):
         try:
             import MetaTrader5 as mt5
         except ImportError as exc:
+            _log_mt5_market_data_status(
+                symbol=symbol,
+                mt5_symbol=to_mt5_symbol(symbol),
+                timeframe=timeframe,
+                bars=0,
+                status="error",
+                last_error="MetaTrader5 Python package is not installed",
+            )
             raise DataProviderError("MetaTrader5 Python package is not installed") from exc
 
-        if not mt5.initialize():
-            raise DataProviderError(f"MetaTrader 5 initialize failed: {mt5.last_error()}")
-
-        normalized = symbol.replace("/", "")
+        mapped_symbol = to_mt5_symbol(symbol)
         tf_constant = getattr(mt5, self._TIMEFRAMES[timeframe])
         request_end = end or datetime.now(timezone.utc)
-        request_start = start or window_for_bars(timeframe, self.settings.max_bars, request_end).start
-        rates = mt5.copy_rates_range(normalized, tf_constant, request_start, request_end)
-        if rates is None or len(rates) == 0:
-            raise DataProviderError(f"MT5 returned no candles for {normalized} {timeframe.value}")
+        try:
+            initialize_mt5_terminal(mt5)
+            selected = bool(mt5.symbol_select(mapped_symbol, True))
+            last_error = mt5_last_error(mt5)
+            _log_mt5_debug(
+                "MT5 market data symbol selection",
+                {
+                    "symbol": symbol,
+                    "mt5_symbol": mapped_symbol,
+                    "timeframe": timeframe.value,
+                    "selected": selected,
+                    "last_error": last_error,
+                },
+            )
+            if not selected:
+                _log_mt5_market_data_status(
+                    symbol=symbol,
+                    mt5_symbol=mapped_symbol,
+                    timeframe=timeframe,
+                    bars=0,
+                    status="error",
+                    last_error=last_error,
+                )
+                raise DataProviderError(
+                    f"MT5 symbol_select failed for {symbol} -> {mapped_symbol} {timeframe.value}: last_error={last_error}"
+                )
 
-        raw = pd.DataFrame(rates)
-        duplicate_bars = int(pd.to_datetime(raw["time"], unit="s", utc=True).duplicated().sum())
-        df = pd.DataFrame(
-            {
-                "open": raw["open"],
-                "high": raw["high"],
-                "low": raw["low"],
-                "close": raw["close"],
-                "volume": raw["tick_volume"],
-                "spread": raw["spread"].astype(float) * pip_size(symbol),
-            },
-            index=pd.to_datetime(raw["time"], unit="s", utc=True),
-        )
-        cleaned = validate_ohlcv(df, min_rows=120)
-        cleaned = attach_data_quality(cleaned, timeframe=timeframe, end=request_end, duplicate_bars=duplicate_bars)
-        cleaned.attrs["provider"] = self.name
-        return cleaned
+            rates = mt5.copy_rates_from_pos(mapped_symbol, tf_constant, 0, self.settings.max_bars)
+            bars = 0 if rates is None else len(rates)
+            last_error = mt5_last_error(mt5)
+            if rates is None or bars == 0:
+                _log_mt5_market_data_status(
+                    symbol=symbol,
+                    mt5_symbol=mapped_symbol,
+                    timeframe=timeframe,
+                    bars=bars,
+                    status="error",
+                    last_error=last_error,
+                )
+                raise DataProviderError(
+                    f"MT5 returned no candles for {symbol} -> {mapped_symbol} {timeframe.value}: "
+                    f"bars={bars} last_error={last_error}"
+                )
+
+            df = mt5_rates_to_ohlcv(symbol, rates, mt5_symbol=mapped_symbol, timeframe=timeframe)
+            duplicate_bars = int(df.index.duplicated().sum())
+            cleaned = validate_ohlcv(df, min_rows=120)
+            cleaned = attach_data_quality(cleaned, timeframe=timeframe, end=request_end, duplicate_bars=duplicate_bars)
+            cleaned.attrs["provider"] = self.name
+            cleaned.attrs["mt5_symbol"] = mapped_symbol
+            _log_mt5_market_data_status(
+                symbol=symbol,
+                mt5_symbol=mapped_symbol,
+                timeframe=timeframe,
+                bars=len(cleaned),
+                status="ok",
+                last_error=last_error,
+            )
+            return cleaned
+        except DataProviderError:
+            raise
+        except Exception as exc:
+            raise DataProviderError(
+                f"MT5 provider failed for {symbol} -> {mapped_symbol} {timeframe.value}: "
+                f"{exc}; last_error={mt5_last_error(mt5)}"
+            ) from exc
+        finally:
+            shutdown = getattr(mt5, "shutdown", None)
+            if callable(shutdown):
+                shutdown()
 
 
 def build_provider(settings: AppSettings) -> MarketDataProvider:
@@ -352,6 +416,153 @@ def build_provider(settings: AppSettings) -> MarketDataProvider:
 def _to_yahoo_symbol(symbol: str) -> str:
     normalized = symbol.replace("/", "").upper()
     return f"{normalized}=X"
+
+
+def to_mt5_symbol(symbol: str) -> str:
+    """Map internal Forex symbols such as EUR/USD to broker symbols such as EURUSD."""
+
+    return "".join(char for char in symbol.upper() if char.isalnum())
+
+
+def mt5_rates_to_ohlcv(
+    symbol: str,
+    rates: object,
+    *,
+    mt5_symbol: str | None = None,
+    timeframe: Timeframe | None = None,
+) -> pd.DataFrame:
+    """Normalize MT5 copy_rates rows into the OHLCV frame expected by validate_ohlcv."""
+
+    raw = pd.DataFrame(rates)
+    if debug_market_data_enabled():
+        _log_mt5_raw_rates(symbol, mt5_symbol or to_mt5_symbol(symbol), timeframe, raw)
+    required = ["time", "open", "high", "low", "close"]
+    missing = [column for column in required if column not in raw.columns]
+    if missing:
+        raise DataProviderError(f"MT5 rates are missing required columns: {', '.join(missing)}")
+    timestamp = pd.to_datetime(raw["time"].to_numpy(), unit="s", utc=True)
+    volume = raw["tick_volume"].to_numpy(dtype=float) if "tick_volume" in raw.columns else _optional_raw_column(raw, "real_volume", 0.0)
+    spread = raw["spread"].to_numpy(dtype=float) * pip_size(symbol) if "spread" in raw.columns else np.full(len(raw), np.nan)
+    normalized = pd.DataFrame(
+        {
+            "open": raw["open"].to_numpy(dtype=float),
+            "high": raw["high"].to_numpy(dtype=float),
+            "low": raw["low"].to_numpy(dtype=float),
+            "close": raw["close"].to_numpy(dtype=float),
+            "volume": volume,
+            "spread": spread,
+        },
+        index=timestamp,
+    )
+    normalized.index.name = "timestamp"
+    if debug_market_data_enabled():
+        _log_mt5_debug(
+            "MT5 normalized OHLCV",
+            {
+                "symbol": symbol,
+                "mt5_symbol": mt5_symbol or to_mt5_symbol(symbol),
+                "timeframe": timeframe.value if timeframe else "",
+                "rows": len(normalized),
+                "columns": ",".join(str(column) for column in normalized.columns),
+                "nan_counts": str(normalized.isna().sum().to_dict()),
+                "last_candle": normalized.tail(1).to_json(date_format="iso"),
+            },
+        )
+    return normalized
+
+
+def _optional_raw_column(raw: pd.DataFrame, column: str, default: float) -> np.ndarray:
+    if column in raw.columns:
+        return raw[column].to_numpy(dtype=float)
+    return np.full(len(raw), default, dtype=float)
+
+
+def _log_mt5_raw_rates(symbol: str, mt5_symbol: str, timeframe: Timeframe | None, raw: pd.DataFrame) -> None:
+    _log_mt5_debug(
+        "MT5 raw rates diagnostics",
+        {
+            "symbol": symbol,
+            "mt5_symbol": mt5_symbol,
+            "timeframe": timeframe.value if timeframe else "",
+            "rows": len(raw),
+            "columns": ",".join(str(column) for column in raw.columns),
+            "head": raw.head(3).to_json(date_format="iso"),
+            "tail": raw.tail(3).to_json(date_format="iso"),
+            "dtypes": str({str(key): str(value) for key, value in raw.dtypes.to_dict().items()}),
+            "nan_counts": str(raw.isna().sum().to_dict()),
+        },
+    )
+
+
+def debug_market_data_enabled() -> bool:
+    """Return true when heavy market-data diagnostics are explicitly requested."""
+
+    return os.getenv(DEBUG_MARKET_DATA_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _log_mt5_market_data_status(
+    *,
+    symbol: str,
+    mt5_symbol: str,
+    timeframe: Timeframe,
+    bars: int,
+    status: Literal["ok", "error"],
+    last_error: str,
+) -> None:
+    message = "MT5 market data OK" if status == "ok" else "MT5 market data error"
+    level = LOGGER.info if status == "ok" else LOGGER.warning
+    level(
+        message,
+        extra={
+            "symbol": symbol,
+            "mt5_symbol": mt5_symbol,
+            "timeframe": timeframe.value,
+            "bars": bars,
+            "status": status,
+            "last_error": last_error,
+        },
+    )
+
+
+def _log_mt5_debug(message: str, extra: dict[str, object]) -> None:
+    if debug_market_data_enabled():
+        LOGGER.info(message, extra=extra)
+
+
+def initialize_mt5_terminal(mt5: object, *, timeout_seconds: float = 10.0) -> None:
+    """Initialize MT5 using local demo credentials when available."""
+
+    initialize = getattr(mt5, "initialize")
+    kwargs: dict[str, Any] = {"timeout": int(timeout_seconds * 1000)}
+    login = os.getenv(MT5_LOGIN_ENV)
+    password = os.getenv(MT5_PASSWORD_ENV)
+    server = os.getenv(MT5_SERVER_ENV)
+    path = os.getenv(MT5_PATH_ENV)
+    if login and password and server:
+        try:
+            kwargs["login"] = int(str(login))
+        except ValueError as exc:
+            raise DataProviderError("MT5_LOGIN must be an integer account id") from exc
+        kwargs["password"] = str(password)
+        kwargs["server"] = str(server)
+    if path:
+        kwargs["path"] = path
+    try:
+        ok = bool(initialize(**kwargs))
+    except TypeError:
+        kwargs.pop("timeout", None)
+        ok = bool(initialize(**kwargs))
+    if not ok:
+        raise DataProviderError(f"MetaTrader 5 initialize failed: last_error={mt5_last_error(mt5)}")
+
+
+def mt5_last_error(mt5: object) -> str:
+    """Return MT5 last_error as a safe string for logs and diagnostics."""
+
+    last_error = getattr(mt5, "last_error", None)
+    if not callable(last_error):
+        return "unavailable"
+    return str(last_error())
 
 
 def _stable_seed(base_seed: int, symbol: str, timeframe: str) -> int:

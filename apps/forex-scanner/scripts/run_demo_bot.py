@@ -20,7 +20,12 @@ def main() -> None:
     add_cycle_arguments(parser)
     args = parser.parse_args()
 
-    settings, database, provider = load_demo_runtime("run_demo_bot.py", provider_name=args.provider, broker_mode=args.broker)
+    settings, database, provider = load_demo_runtime(
+        "run_demo_bot.py",
+        provider_name=args.provider,
+        broker_mode=args.broker,
+        debug_market_data=args.debug_market_data,
+    )
     config = DemoBotConfig.from_settings(settings)
     style = TradingStyle(args.style)
     symbols = normalize_symbols(args.symbols)

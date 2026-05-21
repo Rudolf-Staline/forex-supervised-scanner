@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from app.config.env import load_dotenv
 from app.config.safety import ensure_mt5_demo_safe_mode
 from app.config.settings import AppSettings, load_settings
 from app.core.types import TradingStyle
-from app.data.providers import MarketDataProvider, build_provider
+from app.data.providers import DEBUG_MARKET_DATA_ENV, MarketDataProvider, build_provider
 from app.execution.demo_bot import DemoBotCycleResult
 from app.storage.database import Database
 from app.utils.logging import configure_logging
@@ -30,8 +31,8 @@ def add_cycle_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--provider",
         default="synthetic",
-        choices=["synthetic", "auto"],
-        help="Data provider for terminal demos. Default: synthetic. Use auto to try MT5/Yahoo before fallback.",
+        choices=["synthetic", "auto", "mt5"],
+        help="Data provider for terminal demos. Default: synthetic. Use mt5 for explicit MT5 market data.",
     )
     parser.add_argument(
         "--broker",
@@ -45,6 +46,11 @@ def add_cycle_arguments(parser: argparse.ArgumentParser) -> None:
         default=DEFAULT_DEMO_SYMBOLS,
         help="Symbols to scan. Default: EUR/USD GBP/USD USD/CHF.",
     )
+    parser.add_argument(
+        "--debug-market-data",
+        action="store_true",
+        help="Enable verbose MT5 market-data diagnostics (raw columns, dtypes, head/tail, NaN counts).",
+    )
 
 
 def load_demo_runtime(
@@ -52,11 +58,16 @@ def load_demo_runtime(
     *,
     provider_name: str = "synthetic",
     broker_mode: str = "paper",
+    debug_market_data: bool = False,
 ) -> tuple[AppSettings, Database, MarketDataProvider]:
     """Load settings, enforce paper/demo safety, and build runtime services."""
 
     load_dotenv()
     configure_logging()
+    if debug_market_data:
+        os.environ[DEBUG_MARKET_DATA_ENV] = "true"
+    else:
+        os.environ.pop(DEBUG_MARKET_DATA_ENV, None)
     settings = load_settings().model_copy(deep=True)
     settings.provider.name = provider_name
     try:
