@@ -16,7 +16,7 @@ from app.config.watchlists import watchlist_names
 from app.data.mt5_symbols_health import (
     diagnose_watchlist_symbols,
     export_symbol_health_csv,
-    resolve_symbols,
+    resolve_symbols_for_asset_class,
     summarize_symbol_health,
 )
 from app.data.providers import DataProviderError
@@ -27,15 +27,16 @@ def main() -> None:
     """Run MT5 market-data diagnostics without submitting any order."""
 
     parser = argparse.ArgumentParser(description="Check MT5 symbol health for demo watchlists. No orders are sent.")
-    parser.add_argument("--watchlist", default="major_forex", choices=watchlist_names())
+    parser.add_argument("--watchlist", default=None, choices=watchlist_names())
     parser.add_argument("--symbols", nargs="+", default=None, help="Explicit symbols. Overrides --watchlist.")
+    parser.add_argument("--asset-class", default="all", choices=["forex", "commodities", "indices", "all"])
     parser.add_argument("--export-csv", action="store_true", help="Export reports/mt5_symbols_health.csv.")
     args = parser.parse_args()
 
     load_dotenv()
     configure_logging()
     settings = load_settings()
-    symbols = resolve_symbols(args.symbols, args.watchlist)
+    symbols = resolve_symbols_for_asset_class(args.symbols, args.watchlist, args.asset_class)
     print("mt5_symbols_health=started no_orders=true")
     print(f"symbols={','.join(symbols)}")
     try:
@@ -55,7 +56,7 @@ def main() -> None:
 def _print_symbol(result) -> None:
     print(
         "symbol_health "
-        f"symbol={result.symbol} mt5_symbol={result.mt5_symbol} status={result.status} reason={result.reason} "
+        f"symbol={result.symbol} mt5_symbol={result.mt5_symbol} asset_class={result.asset_class} status={result.status} reason={result.reason} "
         f"visible={result.visible} selected={result.selected} tradable={result.tradable} "
         f"spread={_fmt(result.spread)} atr={_fmt(result.atr)} spread_atr={_fmt(result.spread_atr)} "
         f"trade_mode={result.trade_mode} volume_min={_fmt(result.volume_min)} volume_step={_fmt(result.volume_step)} "

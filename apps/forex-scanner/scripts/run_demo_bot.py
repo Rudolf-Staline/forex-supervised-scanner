@@ -36,7 +36,7 @@ def main() -> None:
     )
     config = DemoBotConfig.from_settings(settings)
     style = TradingStyle(args.style)
-    symbols = normalize_symbols(args.symbols, args.watchlist)
+    symbols = normalize_symbols(args.symbols, args.watchlist, args.asset_class)
     symbols = filter_unhealthy_symbols_if_requested(symbols, args.skip_unhealthy_symbols, args.provider)
     service = DemoBotService(settings, provider, database)
 

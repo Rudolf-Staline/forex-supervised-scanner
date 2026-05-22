@@ -29,6 +29,7 @@ def calculate_position_size(
     stop_loss: float,
     symbol_info: Any,
     max_volume: float | None = None,
+    require_tick_value: bool = False,
 ) -> PositionSizeResult:
     """Calculate a prudent MT5 lot size from account risk and stop distance.
 
@@ -56,7 +57,7 @@ def calculate_position_size(
         raise ValueError("max volume is below MT5 minimum volume")
 
     risk_amount = balance_value * (risk_percent_value / 100.0)
-    risk_per_lot = _risk_per_lot(stop_distance, symbol_info)
+    risk_per_lot = _risk_per_lot(stop_distance, symbol_info, require_tick_value=require_tick_value)
     if risk_per_lot <= 0:
         raise ValueError("risk per lot must be greater than zero")
 
@@ -83,11 +84,13 @@ def calculate_position_size(
     )
 
 
-def _risk_per_lot(stop_distance: float, symbol_info: Any) -> float:
+def _risk_per_lot(stop_distance: float, symbol_info: Any, *, require_tick_value: bool = False) -> float:
     tick_size = _positive_attr(symbol_info, "trade_tick_size") or _positive_attr(symbol_info, "point")
     tick_value = _positive_attr(symbol_info, "trade_tick_value")
     if tick_size and tick_value:
         return (stop_distance / tick_size) * tick_value
+    if require_tick_value:
+        raise ValueError("position_sizing_unavailable: missing coherent tick_value/tick_size")
     contract_size = (
         _positive_attr(symbol_info, "trade_contract_size")
         or _positive_attr(symbol_info, "contract_size")

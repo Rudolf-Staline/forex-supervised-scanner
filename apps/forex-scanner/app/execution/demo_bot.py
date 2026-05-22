@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 
 from app.config.safety import ensure_demo_bot_safe_mode
+from app.config.instruments import AssetClass, instrument_for_symbol
 from app.config.settings import AppSettings
 from app.core.pipeline import ScannerService
 from app.core.types import DirectionBias, MarketRegime, Opportunity, OpportunityStatus, SessionName, TradingStyle
@@ -185,6 +186,7 @@ class DemoBotService:
             reasons.append("operator degraded mode is active")
         if score == 0.0:
             reasons.extend(_zero_score_reasons(opportunity, self.settings))
+        reasons.extend(_instrument_reasons(opportunity))
         if opportunity.status.value not in EXECUTABLE_DEMO_STATUSES:
             reasons.append(f"status {opportunity.status.value} is not executable by demo bot")
         elif opportunity.status.value not in self.config.allowed_statuses:
@@ -335,6 +337,21 @@ def _data_quality_score(opportunity: Opportunity) -> float:
     if opportunity.data_quality is None:
         return 100.0
     return opportunity.data_quality.score
+
+
+def _instrument_reasons(opportunity: Opportunity) -> list[str]:
+    config = instrument_for_symbol(opportunity.symbol)
+    reasons: list[str] = []
+    if config.asset_class != AssetClass.FOREX and config.scan_only and os.getenv("ALLOW_MULTI_ASSET_DEMO_TRADING", "false").strip().lower() != "true":
+        reasons.append(f"scan_only reason=ALLOW_MULTI_ASSET_DEMO_TRADING is false for asset_class={config.asset_class.value}")
+    if opportunity.final_score is not None and opportunity.final_score < config.min_score:
+        reasons.append(f"instrument min_score {opportunity.final_score:.1f} below {config.min_score:.1f} for asset_class={config.asset_class.value}")
+    if opportunity.risk_reward is not None and opportunity.risk_reward < config.min_risk_reward:
+        reasons.append(f"instrument risk/reward {opportunity.risk_reward:.2f} below {config.min_risk_reward:.2f} for asset_class={config.asset_class.value}")
+    spread_atr = _spread_atr(opportunity)
+    if spread_atr is not None and spread_atr > config.max_spread_atr:
+        reasons.append(f"instrument spread/ATR {spread_atr:.3f} above {config.max_spread_atr:.3f} for asset_class={config.asset_class.value}")
+    return reasons
 
 
 def _decision_event(cycle_id: str, opportunity: Opportunity, decision: DemoBotDecision, timestamp: datetime) -> TradeEvent:

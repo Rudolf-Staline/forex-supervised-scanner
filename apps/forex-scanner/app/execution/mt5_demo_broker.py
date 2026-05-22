@@ -16,6 +16,7 @@ from typing import Any
 
 from app.config.safety import DemoSafetyError, ensure_mt5_demo_safe_mode
 from app.config.settings import AppSettings
+from app.config.instruments import AssetClass, canonical_symbol, instrument_for_symbol, resolve_mt5_symbol_from_candidates
 from app.core.types import DirectionBias
 from app.execution.broker import BrokerExecutionError, append_broker_transition
 from app.execution.models import BrokerAccountState, BrokerErrorCategory, BrokerOrderState, ExecutionOrder, OrderRequest, OrderStatus, TradeEventType
@@ -33,6 +34,7 @@ MAX_VOLUME_PER_TRADE_ENV = "MAX_VOLUME_PER_TRADE"
 POSITION_SIZING_MODE_ENV = "POSITION_SIZING_MODE"
 DEFAULT_RISK_PER_TRADE_PERCENT = 0.25
 DEFAULT_MAX_VOLUME_PER_TRADE = 0.05
+ALLOW_MULTI_ASSET_DEMO_TRADING_ENV = "ALLOW_MULTI_ASSET_DEMO_TRADING"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -50,7 +52,9 @@ class MT5SymbolMapper:
         if not target:
             raise BrokerExecutionError(f"unknown MT5 symbol mapping for {internal_symbol}", BrokerErrorCategory.CONFIGURATION)
         available = self.available_symbols()
-        matches = [symbol for symbol in available if _canonical_symbol(symbol).startswith(target)]
+        resolved = resolve_mt5_symbol_from_candidates(internal_symbol, available)
+        resolved_target = _canonical_symbol(resolved)
+        matches = [symbol for symbol in available if symbol == resolved or _canonical_symbol(symbol).startswith(resolved_target or target)]
         if not matches:
             raise BrokerExecutionError(f"unknown MT5 symbol mapping for {internal_symbol}", BrokerErrorCategory.CONFIGURATION)
         exact = [symbol for symbol in matches if _canonical_symbol(symbol) == target]
@@ -154,6 +158,12 @@ class MT5DemoBroker:
         if not account.can_trade:
             raise BrokerExecutionError("MT5 demo account is not tradable", BrokerErrorCategory.ACCOUNT_UNAVAILABLE)
         mapper = self.mapper or MT5SymbolMapper(mt5)
+        instrument = instrument_for_symbol(request.symbol)
+        if instrument.asset_class != AssetClass.FOREX and os.getenv(ALLOW_MULTI_ASSET_DEMO_TRADING_ENV, "false").strip().lower() != "true":
+            raise BrokerExecutionError(
+                f"scan_only reason=ALLOW_MULTI_ASSET_DEMO_TRADING is false for asset_class={instrument.asset_class.value}",
+                BrokerErrorCategory.CONFIGURATION,
+            )
         symbol = mapper.map_symbol(request.symbol)
         tick = getattr(mt5, "symbol_info_tick")(symbol)
         if tick is None:
@@ -170,6 +180,8 @@ class MT5DemoBroker:
             "MT5 demo position sizing",
             extra={
                 "symbol": symbol,
+                "asset_class": instrument.asset_class.value,
+                "instrument_config_used": instrument.logical_symbol,
                 "balance": account.balance,
                 "risk_percent": sizing.risk_percent,
                 "calculated_volume": sizing.calculated_volume,
@@ -196,6 +208,8 @@ class MT5DemoBroker:
                 "live_money": False,
                 "demo_only": True,
                 "position_sizing_mode": os.getenv(POSITION_SIZING_MODE_ENV, "auto").strip().lower() or "auto",
+                "asset_class": instrument.asset_class.value,
+                "instrument_config_used": instrument.logical_symbol,
                 "balance": account.balance or 0.0,
                 "risk_percent": sizing.risk_percent,
                 "calculated_volume": sizing.calculated_volume,
@@ -290,19 +304,22 @@ def _pending_order_type(mt5: object, request: OrderRequest, ask: float, bid: flo
 
 
 def _demo_position_size(account: BrokerAccountState, request: OrderRequest, symbol_info: object) -> PositionSizeResult:
+    instrument = instrument_for_symbol(request.symbol)
     mode = os.getenv(POSITION_SIZING_MODE_ENV, "auto").strip().lower() or "auto"
-    max_volume = _env_float(MAX_VOLUME_PER_TRADE_ENV, DEFAULT_MAX_VOLUME_PER_TRADE)
+    max_volume = instrument.max_volume if instrument.asset_class != AssetClass.FOREX else _env_float(MAX_VOLUME_PER_TRADE_ENV, DEFAULT_MAX_VOLUME_PER_TRADE)
+    require_tick_value = instrument.asset_class != AssetClass.FOREX
     if mode != "auto":
         fixed_volume = min(float(request.quantity_units), max_volume)
         return calculate_position_size(
             balance=account.balance or 1.0,
-            risk_percent=DEFAULT_RISK_PER_TRADE_PERCENT,
+            risk_percent=instrument.risk_percent if instrument.asset_class != AssetClass.FOREX else DEFAULT_RISK_PER_TRADE_PERCENT,
             entry_price=request.entry_price,
             stop_loss=request.stop_loss,
             symbol_info=symbol_info,
             max_volume=fixed_volume,
+            require_tick_value=require_tick_value,
         )
-    risk_percent = _env_float(RISK_PER_TRADE_PERCENT_ENV, DEFAULT_RISK_PER_TRADE_PERCENT)
+    risk_percent = instrument.risk_percent if instrument.asset_class != AssetClass.FOREX else _env_float(RISK_PER_TRADE_PERCENT_ENV, DEFAULT_RISK_PER_TRADE_PERCENT)
     return calculate_position_size(
         balance=account.balance or 0.0,
         risk_percent=risk_percent,
@@ -310,6 +327,7 @@ def _demo_position_size(account: BrokerAccountState, request: OrderRequest, symb
         stop_loss=request.stop_loss,
         symbol_info=symbol_info,
         max_volume=max_volume,
+        require_tick_value=require_tick_value,
     )
 
 
@@ -389,7 +407,7 @@ def _env_float(name: str, default: float) -> float:
 
 
 def _canonical_symbol(value: str) -> str:
-    return "".join(char for char in value.upper() if char.isalnum())
+    return canonical_symbol(value)
 
 
 def _load_mt5_module() -> object | None:

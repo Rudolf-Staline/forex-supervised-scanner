@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from app.config.settings import AppSettings, ProviderSettings
+from app.config.instruments import canonical_symbol, resolve_mt5_symbol_from_candidates
 from app.core.types import TIMEFRAME_MINUTES, TIMEFRAME_PANDAS_RULE, Timeframe
 from app.data.validation import attach_data_quality, pip_size, validate_ohlcv, window_for_bars
 
@@ -317,7 +318,7 @@ class MetaTrader5Provider(MarketDataProvider):
             )
             raise DataProviderError("MetaTrader5 Python package is not installed") from exc
 
-        mapped_symbol = to_mt5_symbol(symbol)
+        mapped_symbol = _resolve_mt5_market_symbol(mt5, symbol)
         tf_constant = getattr(mt5, self._TIMEFRAMES[timeframe])
         request_end = end or datetime.now(timezone.utc)
         try:
@@ -422,6 +423,20 @@ def to_mt5_symbol(symbol: str) -> str:
     """Map internal Forex symbols such as EUR/USD to broker symbols such as EURUSD."""
 
     return "".join(char for char in symbol.upper() if char.isalnum())
+
+
+def _resolve_mt5_market_symbol(mt5: object, symbol: str) -> str:
+    symbols_get = getattr(mt5, "symbols_get", None)
+    if not callable(symbols_get):
+        return resolve_mt5_symbol_from_candidates(symbol)
+    try:
+        available = [str(getattr(row, "name", row)) for row in (symbols_get() or []) if str(getattr(row, "name", row)).strip()]
+    except Exception:
+        available = []
+    resolved = resolve_mt5_symbol_from_candidates(symbol, available)
+    if resolved:
+        return resolved
+    return canonical_symbol(symbol)
 
 
 def mt5_rates_to_ohlcv(

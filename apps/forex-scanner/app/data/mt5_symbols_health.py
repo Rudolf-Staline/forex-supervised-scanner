@@ -8,6 +8,7 @@ from typing import Iterable
 
 import pandas as pd
 
+from app.config.instruments import AssetClass, filter_symbols_by_asset_class, instrument_for_symbol, resolve_mt5_symbol_from_candidates, symbols_for_asset_class
 from app.config.settings import AppSettings, load_settings
 from app.config.watchlists import get_watchlist
 from app.core.types import Timeframe
@@ -35,6 +36,7 @@ class SymbolHealth:
 
     symbol: str
     mt5_symbol: str
+    asset_class: str
     status: str
     visible: bool
     selected: bool
@@ -81,6 +83,16 @@ def resolve_symbols(symbols: list[str] | None = None, watchlist: str | None = No
     return get_watchlist("major_forex")
 
 
+def resolve_symbols_for_asset_class(symbols: list[str] | None, watchlist: str | None, asset_class: str | None) -> list[str]:
+    """Resolve symbols/watchlist and filter or default by asset class."""
+
+    if symbols or watchlist:
+        return filter_symbols_by_asset_class(resolve_symbols(symbols, watchlist), asset_class)
+    if asset_class and asset_class != "all":
+        return symbols_for_asset_class(AssetClass(asset_class))
+    return resolve_symbols(None, None)
+
+
 def diagnose_watchlist_symbols(
     symbols: Iterable[str],
     *,
@@ -117,7 +129,8 @@ def diagnose_symbol(
 ) -> SymbolHealth:
     """Inspect one MT5 symbol across H1, M15, and M5."""
 
-    mt5_symbol = to_mt5_symbol(symbol)
+    config = instrument_for_symbol(symbol)
+    mt5_symbol = _resolve_health_mt5_symbol(mt5, symbol)
     selected = bool(mt5.symbol_select(mt5_symbol, True))
     info = mt5.symbol_info(mt5_symbol)
     visible = bool(getattr(info, "visible", False)) if info is not None else False
@@ -136,6 +149,7 @@ def diagnose_symbol(
     return SymbolHealth(
         symbol=symbol,
         mt5_symbol=mt5_symbol,
+        asset_class=config.asset_class.value,
         status="OK" if reason == "healthy" else "ERROR",
         visible=visible,
         selected=selected,
@@ -340,6 +354,7 @@ def _base_row(result: SymbolHealth) -> dict[str, object]:
     return {
         "symbol": result.symbol,
         "mt5_symbol": result.mt5_symbol,
+        "asset_class": result.asset_class,
         "status": result.status,
         "reason": result.reason,
         "visible": result.visible,
@@ -358,10 +373,12 @@ def _base_row(result: SymbolHealth) -> dict[str, object]:
 
 
 def _failed_symbol_health(symbol: str, mt5: object, reason: str) -> SymbolHealth:
-    mt5_symbol = to_mt5_symbol(symbol)
+    config = instrument_for_symbol(symbol)
+    mt5_symbol = resolve_mt5_symbol_from_candidates(symbol)
     return SymbolHealth(
         symbol=symbol,
         mt5_symbol=mt5_symbol,
+        asset_class=config.asset_class.value,
         status="ERROR",
         visible=False,
         selected=False,
@@ -378,3 +395,14 @@ def _failed_symbol_health(symbol: str, mt5: object, reason: str) -> SymbolHealth
         reason=reason,
         timeframes=[TimeframeHealth(timeframe=timeframe, bars=0, last_candle="", error=reason) for timeframe in HEALTH_TIMEFRAMES],
     )
+
+
+def _resolve_health_mt5_symbol(mt5: object, symbol: str) -> str:
+    symbols_get = getattr(mt5, "symbols_get", None)
+    available: list[str] = []
+    if callable(symbols_get):
+        try:
+            available = [str(getattr(row, "name", row)) for row in (symbols_get() or []) if str(getattr(row, "name", row)).strip()]
+        except Exception:
+            available = []
+    return resolve_mt5_symbol_from_candidates(symbol, available)

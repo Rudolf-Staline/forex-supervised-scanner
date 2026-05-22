@@ -36,6 +36,7 @@ class FakeMT5:
         if symbol not in {"EURUSD", "EURJPY"}:
             return None
         return SimpleNamespace(
+            name=symbol,
             visible=True,
             trade_mode=4,
             volume_min=0.01,
@@ -132,6 +133,7 @@ def _health(symbol: str, *, spread_atr: float | None = 0.2, status: str = "OK", 
     return SymbolHealth(
         symbol=symbol,
         mt5_symbol=symbol.replace("/", ""),
+        asset_class="forex",
         status=status,
         visible=status == "OK",
         selected=status == "OK",

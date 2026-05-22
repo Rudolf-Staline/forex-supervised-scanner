@@ -16,6 +16,7 @@ from app.config.env import load_dotenv
 from app.config.safety import ensure_mt5_demo_safe_mode
 from app.config.settings import AppSettings, load_settings
 from app.config.watchlists import get_watchlist, watchlist_names
+from app.config.instruments import filter_symbols_by_asset_class
 from app.core.types import TradingStyle
 from app.data.mt5_symbols_health import split_healthy_symbols, summarize_symbol_health
 from app.data.providers import DEBUG_MARKET_DATA_ENV, DataProviderError, MarketDataProvider, build_provider
@@ -54,6 +55,7 @@ def add_cycle_arguments(parser: argparse.ArgumentParser) -> None:
         choices=watchlist_names(),
         help="Named watchlist profile to scan, for example major_forex.",
     )
+    parser.add_argument("--asset-class", default="all", choices=["forex", "commodities", "indices", "all"])
     parser.add_argument(
         "--debug-market-data",
         action="store_true",
@@ -95,17 +97,17 @@ def load_demo_runtime(
     return settings, database, provider
 
 
-def normalize_symbols(symbols: list[str] | None, watchlist: str | None = None) -> list[str]:
+def normalize_symbols(symbols: list[str] | None, watchlist: str | None = None, asset_class: str | None = None) -> list[str]:
     """Accept explicit symbols first, then a named watchlist, then defaults."""
 
     normalized: list[str] = []
     for raw in symbols or []:
         normalized.extend(_normalize_symbol(symbol) for symbol in raw.split(",") if symbol.strip())
     if normalized:
-        return normalized
+        return filter_symbols_by_asset_class(normalized, asset_class)
     if watchlist:
-        return [_normalize_symbol(symbol) for symbol in get_watchlist(watchlist)]
-    return normalized or list(DEFAULT_DEMO_SYMBOLS)
+        return filter_symbols_by_asset_class([_normalize_symbol(symbol) for symbol in get_watchlist(watchlist)], asset_class)
+    return filter_symbols_by_asset_class(normalized or list(DEFAULT_DEMO_SYMBOLS), asset_class)
 
 
 def filter_unhealthy_symbols_if_requested(symbols: list[str], enabled: bool, provider_name: str) -> list[str]:

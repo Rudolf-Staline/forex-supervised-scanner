@@ -32,7 +32,7 @@ def main() -> None:
         debug_market_data=args.debug_market_data,
     )
     style = TradingStyle(args.style)
-    symbols = normalize_symbols(args.symbols, args.watchlist)
+    symbols = normalize_symbols(args.symbols, args.watchlist, args.asset_class)
     symbols = filter_unhealthy_symbols_if_requested(symbols, args.skip_unhealthy_symbols, args.provider)
     print(f"runtime provider={provider.name} broker={args.broker} mode=paper")
     result = DemoBotService(settings, provider, database).run_cycle(style, symbols, watchlist=args.watchlist)
