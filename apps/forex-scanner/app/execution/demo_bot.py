@@ -17,6 +17,7 @@ from app.data.providers import MarketDataProvider
 from app.execution.demo_bot_config import DemoBotConfig, EXECUTABLE_DEMO_STATUSES
 from app.execution.models import ExecutionOrder, TradeEvent, TradeEventType
 from app.execution.rejected_signals import RejectedSignalRecord
+from app.market.sessions import get_market_session
 from app.paper.trading import submit_signal_to_paper
 from app.risk.daily_limits import DailyRiskConfig, DailyRiskSummary, evaluate_daily_limits, summarize_daily_risk
 from app.storage.database import Database
@@ -319,7 +320,15 @@ def _spread_friction_reason(opportunity: Opportunity, settings: AppSettings) -> 
 def _market_context_reasons(opportunity: Opportunity) -> list[str]:
     reasons: list[str] = []
     if opportunity.session == SessionName.OFF_HOURS:
-        reasons.append("off-hours session is not executable by demo bot")
+        instrument = instrument_for_symbol(opportunity.symbol)
+        session_info = get_market_session(opportunity.timestamp, instrument.asset_class, opportunity.symbol)
+        reasons.append(
+            "off-hours session is not executable by demo bot; "
+            f"asset_class={session_info.asset_class} "
+            f"session_name={session_info.session_name} "
+            f"is_tradable_session={str(session_info.is_tradable_session).lower()} "
+            f"next_tradable_window={session_info.next_tradable_window}"
+        )
 
     blocked_regimes = {MarketRegime.HIGH_VOLATILITY, MarketRegime.NO_TRADE}
     for label, regime in {
