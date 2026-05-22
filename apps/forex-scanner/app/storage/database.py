@@ -153,6 +153,8 @@ class Database:
                     status TEXT NOT NULL,
                     score REAL,
                     risk_reward REAL,
+                    pattern_score REAL,
+                    detected_patterns_json TEXT,
                     market_regime TEXT,
                     spread_atr REAL,
                     rejection_reasons_json TEXT NOT NULL,
@@ -164,6 +166,7 @@ class Database:
                     provider TEXT,
                     broker TEXT,
                     style TEXT,
+                    watchlist TEXT,
                     payload_json TEXT NOT NULL
                 );
 
@@ -573,6 +576,7 @@ class Database:
             )
             self._migrate_scan_results(connection)
             self._migrate_paper_orders(connection)
+            self._migrate_rejected_signals(connection)
             self._migrate_broker_health_snapshots(connection)
             self._migrate_broker_incidents(connection)
             self._migrate_operator_audit_tables(connection)
@@ -860,6 +864,8 @@ class Database:
                 record.status,
                 record.score,
                 record.risk_reward,
+                record.pattern_score,
+                json.dumps(record.detected_patterns),
                 record.market_regime,
                 record.spread_atr,
                 json.dumps(record.rejection_reasons),
@@ -871,6 +877,7 @@ class Database:
                 record.provider,
                 record.broker,
                 record.style,
+                record.watchlist,
                 record.model_dump_json(),
             )
             for record in records
@@ -882,9 +889,10 @@ class Database:
                 """
                 INSERT OR REPLACE INTO rejected_signals (
                     id, cycle_id, timestamp, symbol, setup, status, score, risk_reward,
-                    market_regime, spread_atr, rejection_reasons_json, entry, stop_loss,
-                    tp1, tp2, tp3, provider, broker, style, payload_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    pattern_score, detected_patterns_json, market_regime, spread_atr,
+                    rejection_reasons_json, entry, stop_loss, tp1, tp2, tp3, provider,
+                    broker, style, watchlist, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )
@@ -2552,6 +2560,17 @@ class Database:
         for column, column_type in migrations.items():
             if column not in columns:
                 connection.execute(f"ALTER TABLE paper_orders ADD COLUMN {column} {column_type}")
+
+    def _migrate_rejected_signals(self, connection: sqlite3.Connection) -> None:
+        columns = _table_columns(connection, "rejected_signals")
+        migrations = {
+            "pattern_score": "REAL",
+            "detected_patterns_json": "TEXT",
+            "watchlist": "TEXT",
+        }
+        for column, column_type in migrations.items():
+            if column not in columns:
+                connection.execute(f"ALTER TABLE rejected_signals ADD COLUMN {column} {column_type}")
 
     def _migrate_broker_incidents(self, connection: sqlite3.Connection) -> None:
         columns = _table_columns(connection, "broker_incidents")

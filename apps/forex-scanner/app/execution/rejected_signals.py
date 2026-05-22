@@ -18,6 +18,8 @@ class RejectedSignalRecord(BaseModel):
     status: str
     score: float | None = None
     risk_reward: float | None = None
+    pattern_score: float = 0.0
+    detected_patterns: list[str] = Field(default_factory=list)
     market_regime: str | None = None
     spread_atr: float | None = None
     rejection_reasons: list[str] = Field(default_factory=list)
@@ -29,3 +31,4 @@ class RejectedSignalRecord(BaseModel):
     provider: str | None = None
     broker: str | None = None
     style: str | None = None
+    watchlist: str | None = None

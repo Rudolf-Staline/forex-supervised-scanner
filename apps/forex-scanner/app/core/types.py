@@ -397,6 +397,8 @@ class TradeRecord(BaseModel):
     context_score: float | None = Field(default=None, ge=0.0, le=100.0)
     empirical_score: float | None = Field(default=None, ge=0.0, le=100.0)
     final_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    detected_patterns: list[str] = Field(default_factory=list)
+    pattern_score: float = Field(default=0.0, ge=0.0, le=15.0)
     outcome: TradeOutcomeLabel | None = None
     tp1_hit: bool = False
     tp2_hit: bool = False

@@ -175,6 +175,8 @@ class Backtester:
                 context_score=score_result.context_score,
                 empirical_score=score_result.empirical_score,
                 final_score=score_result.final_score,
+                detected_patterns=setup.detected_patterns,
+                pattern_score=setup.pattern_score,
             )
             trades.append(trade)
             blocked_until = trade.exit_time
@@ -206,6 +208,8 @@ def _simulate_trade(
     context_score: float,
     empirical_score: float,
     final_score: float,
+    detected_patterns: list[str],
+    pattern_score: float,
 ) -> TradeRecord:
     exit_reason: Literal["take_profit", "stop_loss", "time_exit", "end_of_data"] = "end_of_data"
     exit_price = float(risk_plan.entry)
@@ -275,6 +279,8 @@ def _simulate_trade(
         context_score=context_score,
         empirical_score=empirical_score,
         final_score=final_score,
+        detected_patterns=detected_patterns,
+        pattern_score=pattern_score,
         outcome=path.outcome,
         tp1_hit=path.tp1_hit,
         tp2_hit=path.tp2_hit,

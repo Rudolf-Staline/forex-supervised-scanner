@@ -34,6 +34,13 @@ WATCHLISTS: dict[str, list[str]] = {
         "GBP/JPY",
         "EUR/GBP",
     ],
+    "deriv_demo_recommended": [
+        "EUR/USD",
+        "USD/CHF",
+        "AUD/USD",
+        "USD/CAD",
+        "USD/JPY",
+    ],
 }
 
 

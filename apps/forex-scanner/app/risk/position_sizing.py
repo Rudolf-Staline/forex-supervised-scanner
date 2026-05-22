@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_FLOOR
+from math import isclose, isfinite
 from typing import Any
 
 
@@ -68,8 +69,7 @@ def calculate_position_size(
         final_volume = volume_min
     if allowed_max is not None and final_volume > allowed_max:
         final_volume = _floor_to_step(allowed_max, volume_step)
-    if final_volume <= 0:
-        raise ValueError("final volume must be greater than zero")
+    _validate_final_volume(final_volume, volume_min=volume_min, volume_step=volume_step, allowed_max=allowed_max)
 
     return PositionSizeResult(
         calculated_volume=calculated_volume,
@@ -97,6 +97,8 @@ def _risk_per_lot(stop_distance: float, symbol_info: Any) -> float:
 
 
 def _floor_to_step(value: float, step: float) -> float:
+    if not isfinite(value) or not isfinite(step) or step <= 0:
+        raise ValueError("volume step rounding received an invalid value")
     decimal_value = Decimal(str(value))
     decimal_step = Decimal(str(step))
     steps = (decimal_value / decimal_step).to_integral_value(rounding=ROUND_FLOOR)
@@ -108,7 +110,7 @@ def _require_positive(name: str, value: float | None) -> float:
     if value is None:
         raise ValueError(f"{name} is required")
     result = float(value)
-    if result <= 0:
+    if not isfinite(result) or result <= 0:
         raise ValueError(f"{name} must be greater than zero")
     return result
 
@@ -117,7 +119,7 @@ def _optional_positive(name: str, value: float | None) -> float | None:
     if value is None:
         return None
     result = float(value)
-    if result <= 0:
+    if not isfinite(result) or result <= 0:
         raise ValueError(f"{name} must be greater than zero")
     return result
 
@@ -127,4 +129,18 @@ def _positive_attr(source: Any, name: str) -> float | None:
     if value is None:
         return None
     result = float(value)
-    return result if result > 0 else None
+    return result if isfinite(result) and result > 0 else None
+
+
+def _validate_final_volume(final_volume: float, *, volume_min: float, volume_step: float, allowed_max: float | None) -> None:
+    if not isfinite(final_volume) or final_volume <= 0:
+        raise ValueError("final volume must be greater than zero")
+    if final_volume < volume_min:
+        raise ValueError("final volume is below MT5 minimum volume")
+    if allowed_max is not None and final_volume > allowed_max:
+        raise ValueError("final volume exceeds allowed maximum volume")
+    if volume_step <= 0 or not isfinite(volume_step):
+        raise ValueError("volume_step must be greater than zero")
+    steps = final_volume / volume_step
+    if not isclose(steps, round(steps), rel_tol=0.0, abs_tol=1e-9):
+        raise ValueError("final volume does not respect MT5 volume_step")

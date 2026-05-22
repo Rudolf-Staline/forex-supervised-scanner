@@ -61,7 +61,7 @@ class DemoBotService:
         self.config = DemoBotConfig.from_settings(settings)
         self.daily_risk_config = DailyRiskConfig.from_env()
 
-    def run_cycle(self, style: TradingStyle, symbols: list[str]) -> DemoBotCycleResult:
+    def run_cycle(self, style: TradingStyle, symbols: list[str], watchlist: str | None = None) -> DemoBotCycleResult:
         """Scan, filter, guard, create paper orders, and persist decision events."""
 
         ensure_demo_bot_safe_mode(self.settings, context="demo bot cycle")
@@ -116,7 +116,7 @@ class DemoBotService:
             decisions.append(decision)
             events.append(_decision_event(cycle_id, opportunity, decision, started))
             if not decision.accepted:
-                rejected_records.append(_rejected_signal_record(cycle_id, opportunity, decision, started))
+                rejected_records.append(_rejected_signal_record(cycle_id, opportunity, decision, started, watchlist=watchlist))
 
         self.database.rebuild_trading_journal()
         completed = datetime.now(timezone.utc)
@@ -364,6 +364,8 @@ def _rejected_signal_record(
     opportunity: Opportunity,
     decision: DemoBotDecision,
     timestamp: datetime,
+    *,
+    watchlist: str | None = None,
 ) -> RejectedSignalRecord:
     return RejectedSignalRecord(
         id=str(uuid.uuid4()),
@@ -374,6 +376,8 @@ def _rejected_signal_record(
         status=opportunity.status.value,
         score=decision.final_score,
         risk_reward=decision.risk_reward,
+        pattern_score=decision.pattern_score,
+        detected_patterns=list(decision.detected_patterns),
         market_regime=opportunity.regime.value if opportunity.regime else None,
         spread_atr=_spread_atr(opportunity),
         rejection_reasons=list(decision.reasons),
@@ -385,6 +389,7 @@ def _rejected_signal_record(
         provider=opportunity.provider,
         broker=os.getenv("BROKER_MODE", "paper").strip().lower() or "paper",
         style=opportunity.style.value,
+        watchlist=watchlist,
     )
 
 

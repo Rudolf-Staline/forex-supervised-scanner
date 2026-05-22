@@ -89,6 +89,19 @@ def test_mt5_demo_broker_places_tiny_demo_order_without_storing_password(setting
     assert [payload["type_filling"] for payload in fake.order_payloads] == [fake.ORDER_FILLING_IOC, fake.ORDER_FILLING_FOK]
 
 
+def test_mt5_demo_broker_refuses_invalid_position_size_before_order_send(settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_mt5_demo_env(monkeypatch)
+    fake = _FakeMT5(account=_Account())
+    fake.symbol_info_override = _InvalidVolumeSymbolInfo()
+    broker = MT5DemoBroker(settings, mt5_module=fake)
+    broker.connect()
+
+    with pytest.raises(BrokerExecutionError, match="position sizing failed"):
+        broker.place_order(_request())
+
+    assert fake.order_payloads == []
+
+
 def _set_mt5_demo_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EXECUTION_MODE", "paper")
     monkeypatch.setenv("ALLOW_LIVE_TRADING", "false")
@@ -162,6 +175,12 @@ class _SymbolInfo:
     trade_contract_size = 100_000.0
 
 
+class _InvalidVolumeSymbolInfo(_SymbolInfo):
+    volume_min = 0.01
+    volume_step = 0.03
+    volume_max = 0.02
+
+
 class _FakeMT5:
     ACCOUNT_TRADE_MODE_DEMO = 0
     TRADE_ACTION_PENDING = 5
@@ -178,6 +197,7 @@ class _FakeMT5:
 
     def __init__(self, *, account: _Account) -> None:
         self.account = account
+        self.symbol_info_override = None
         self.last_initialize_kwargs = {}
         self.last_order_payload = {}
         self.order_payloads = []
@@ -203,6 +223,8 @@ class _FakeMT5:
         return _Tick() if symbol == "EURUSD" else None
 
     def symbol_info(self, symbol: str):
+        if self.symbol_info_override is not None:
+            return self.symbol_info_override
         return _SymbolInfo() if symbol == "EURUSD" else None
 
     def order_send(self, payload):

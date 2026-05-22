@@ -161,7 +161,10 @@ class MT5DemoBroker:
         symbol_info = getattr(mt5, "symbol_info")(symbol)
         if symbol_info is None:
             raise BrokerExecutionError(f"MT5 demo symbol_info unavailable for {symbol}", BrokerErrorCategory.CONNECTIVITY)
-        sizing = _demo_position_size(account, request, symbol_info)
+        try:
+            sizing = _demo_position_size(account, request, symbol_info)
+        except ValueError as exc:
+            raise BrokerExecutionError(f"MT5 demo position sizing failed: {exc}", BrokerErrorCategory.CONFIGURATION) from exc
         broker_request = request.model_copy(update={"quantity_units": sizing.final_volume})
         LOGGER.info(
             "MT5 demo position sizing",

@@ -61,10 +61,27 @@ def test_position_size_rejects_zero_stop_distance() -> None:
         calculate_position_size(1000.0, 0.25, 1.1000, 1.1000, _SymbolInfo())
 
 
+def test_position_size_rejects_non_finite_values() -> None:
+    with pytest.raises(ValueError, match="entry_price must be greater than zero"):
+        calculate_position_size(1000.0, 0.25, float("nan"), 1.0950, _SymbolInfo())
+
+
+def test_position_size_rejects_invalid_final_volume() -> None:
+    with pytest.raises(ValueError, match="final volume"):
+        calculate_position_size(
+            balance=100_000.0,
+            risk_percent=0.25,
+            entry_price=1.1000,
+            stop_loss=1.0950,
+            symbol_info=_SymbolInfo(volume_max=0.02, volume_step=0.03),
+            max_volume=0.02,
+        )
+
+
 class _SymbolInfo:
-    def __init__(self, *, volume_max: float = 100.0) -> None:
+    def __init__(self, *, volume_max: float = 100.0, volume_step: float = 0.01) -> None:
         self.volume_min = 0.01
-        self.volume_step = 0.01
+        self.volume_step = volume_step
         self.volume_max = volume_max
         self.trade_tick_size = 0.00001
         self.trade_tick_value = 1.0

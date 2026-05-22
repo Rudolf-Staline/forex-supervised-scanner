@@ -4,7 +4,15 @@ from __future__ import annotations
 
 import argparse
 
-from _demo_bot_cli import add_cycle_arguments, created_order_ids, load_demo_runtime, normalize_symbols, print_broker_result, print_cycle_result
+from _demo_bot_cli import (
+    add_cycle_arguments,
+    created_order_ids,
+    filter_unhealthy_symbols_if_requested,
+    load_demo_runtime,
+    normalize_symbols,
+    print_broker_result,
+    print_cycle_result,
+)
 from app.core.types import TradingStyle
 from app.execution.demo_bot import DemoBotService
 from app.execution.mt5_demo_broker import MT5DemoBroker
@@ -25,8 +33,9 @@ def main() -> None:
     )
     style = TradingStyle(args.style)
     symbols = normalize_symbols(args.symbols, args.watchlist)
+    symbols = filter_unhealthy_symbols_if_requested(symbols, args.skip_unhealthy_symbols, args.provider)
     print(f"runtime provider={provider.name} broker={args.broker} mode=paper")
-    result = DemoBotService(settings, provider, database).run_cycle(style, symbols)
+    result = DemoBotService(settings, provider, database).run_cycle(style, symbols, watchlist=args.watchlist)
     print_cycle_result(result)
     if args.broker == "mt5_demo":
         _submit_created_orders_to_mt5_demo(settings, database, result)

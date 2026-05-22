@@ -17,7 +17,8 @@ from app.config.safety import ensure_mt5_demo_safe_mode
 from app.config.settings import AppSettings, load_settings
 from app.config.watchlists import get_watchlist, watchlist_names
 from app.core.types import TradingStyle
-from app.data.providers import DEBUG_MARKET_DATA_ENV, MarketDataProvider, build_provider
+from app.data.mt5_symbols_health import split_healthy_symbols, summarize_symbol_health
+from app.data.providers import DEBUG_MARKET_DATA_ENV, DataProviderError, MarketDataProvider, build_provider
 from app.execution.demo_bot import DemoBotCycleResult
 from app.storage.database import Database
 from app.utils.logging import configure_logging
@@ -57,6 +58,11 @@ def add_cycle_arguments(parser: argparse.ArgumentParser) -> None:
         "--debug-market-data",
         action="store_true",
         help="Enable verbose MT5 market-data diagnostics (raw columns, dtypes, head/tail, NaN counts).",
+    )
+    parser.add_argument(
+        "--skip-unhealthy-symbols",
+        action="store_true",
+        help="For MT5 data runs, diagnose watchlist symbols first and skip symbols with bars=0 or non-tradable status.",
     )
 
 
@@ -100,6 +106,42 @@ def normalize_symbols(symbols: list[str] | None, watchlist: str | None = None) -
     if watchlist:
         return [_normalize_symbol(symbol) for symbol in get_watchlist(watchlist)]
     return normalized or list(DEFAULT_DEMO_SYMBOLS)
+
+
+def filter_unhealthy_symbols_if_requested(symbols: list[str], enabled: bool, provider_name: str) -> list[str]:
+    """Optionally remove MT5 symbols that cannot provide usable demo data."""
+
+    if not enabled:
+        return symbols
+    if provider_name != "mt5":
+        print(f"symbol_health=skipped reason=provider_is_{provider_name}")
+        return symbols
+    try:
+        healthy, results = split_healthy_symbols(symbols)
+    except DataProviderError as exc:
+        raise SystemExit(f"symbol_health=error reason={exc}") from exc
+    for result in results:
+        action = "use" if result.healthy else "skip"
+        spread_atr = "n/a" if result.spread_atr is None else f"{result.spread_atr:.4f}"
+        print(
+            "symbol_health "
+            f"symbol={result.symbol} mt5_symbol={result.mt5_symbol} action={action} status={result.status} "
+            f"reason={result.reason} spread_atr={spread_atr}"
+        )
+    _print_symbol_health_summary(results)
+    if not healthy:
+        raise SystemExit("no healthy MT5 symbols remain after --skip-unhealthy-symbols")
+    return healthy
+
+
+def _print_symbol_health_summary(results) -> None:
+    summary = summarize_symbol_health(results)
+    print("Symbol health summary:")
+    print(f"- healthy_symbols: {','.join(summary['healthy_symbols']) or '-'}")
+    print(f"- unhealthy_symbols: {','.join(summary['unhealthy_symbols']) or '-'}")
+    print(f"- highest_spread_atr_symbols: {','.join(summary['highest_spread_atr_symbols']) or '-'}")
+    print(f"- lowest_spread_atr_symbols: {','.join(summary['lowest_spread_atr_symbols']) or '-'}")
+    print(f"- recommended_watchlist_for_demo: {','.join(summary['recommended_watchlist_for_demo']) or '-'}")
 
 
 def _normalize_symbol(symbol: str) -> str:

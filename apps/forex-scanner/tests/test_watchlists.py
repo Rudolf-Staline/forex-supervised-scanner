@@ -27,6 +27,13 @@ def test_all_forex_demo_watchlist_contains_crosses() -> None:
     assert "EUR/GBP" in symbols
 
 
+def test_deriv_demo_recommended_watchlist_exists() -> None:
+    symbols = get_watchlist("deriv_demo_recommended")
+
+    assert symbols
+    assert all("/" in symbol for symbol in symbols)
+
+
 def test_symbols_override_watchlist() -> None:
     assert normalize_symbols(["EUR/USD", "GBP/USD"], "all_forex_demo") == ["EUR/USD", "GBP/USD"]
 
