@@ -23,7 +23,14 @@ from app.data.mt5_symbols_health import split_healthy_symbols, summarize_symbol_
 from app.data.mt5_symbol_resolver import set_mt5_symbol_overrides
 from app.data.providers import DEBUG_MARKET_DATA_ENV, DataProviderError, MarketDataProvider, build_provider
 from app.execution.demo_bot import DemoBotCycleResult
+from app.execution.models import ExecutionOrder
 from app.market.sessions import get_market_session
+from app.notifications.notifier import notify_session_transition, update_session_notification_state
+from app.safety.demo_execution_gate import (
+    DemoExecutionGateContext,
+    evaluate_demo_execution_gate,
+    format_demo_execution_gate_result,
+)
 from app.storage.database import Database
 from app.utils.logging import configure_logging
 
@@ -78,6 +85,11 @@ def add_cycle_arguments(parser: argparse.ArgumentParser) -> None:
         "--show-next-windows",
         action="store_true",
         help="Print current UTC time and next configured demo-session windows.",
+    )
+    parser.add_argument(
+        "--explain-execution-gate",
+        action="store_true",
+        help="Explain why created paper orders would or would not pass the strict MT5 demo execution gate.",
     )
 
 
@@ -161,6 +173,7 @@ def filter_tradable_session_symbols_if_requested(
     enabled: bool,
     *,
     now_utc: datetime | None = None,
+    broker_mode: str = "paper",
 ) -> list[str]:
     """Optionally skip symbols outside configured asset-class demo sessions."""
 
@@ -173,8 +186,10 @@ def filter_tradable_session_symbols_if_requested(
         instrument = instrument_for_symbol(symbol)
         session = get_market_session(now, instrument.asset_class, symbol)
         if session.is_tradable_session:
+            notify_session_transition(session, broker_mode=broker_mode)
             tradable.append(symbol)
             continue
+        update_session_notification_state(session)
         next_windows.append(session.next_tradable_window)
         print(
             "skipped_off_hours "
@@ -202,6 +217,17 @@ def print_next_session_windows(symbols: list[str] | None = None, *, now_utc: dat
     print(f"recommended_next_run_time={recommended_next_run_time(list(windows.values()))}")
 
 
+def next_session_windows_for_symbols(symbols: list[str], *, now_utc: datetime | None = None) -> list[str]:
+    """Return next tradable windows for the provided symbols."""
+
+    now = now_utc or datetime.now(timezone.utc)
+    windows: list[str] = []
+    for symbol in symbols:
+        instrument = instrument_for_symbol(symbol)
+        windows.append(get_market_session(now, instrument.asset_class, symbol).next_tradable_window)
+    return windows
+
+
 def recommended_next_run_time(next_windows: list[str]) -> str:
     """Return the earliest readable next-run timestamp found in session-window strings."""
 
@@ -217,6 +243,30 @@ def recommended_next_run_time(next_windows: list[str]) -> str:
                 candidates.append(part)
                 break
     return min(candidates) if candidates else "no configured tradable window found"
+
+
+def calculate_session_wait_seconds(
+    recommended_time: str,
+    *,
+    now_utc: datetime | None = None,
+    max_wait_seconds: int = 86400,
+) -> tuple[int, bool]:
+    """Calculate capped wait seconds until the next tradable session."""
+
+    if recommended_time == "now":
+        return 0, False
+    now = now_utc or datetime.now(timezone.utc)
+    try:
+        target = datetime.fromisoformat(recommended_time)
+    except ValueError:
+        return max(0, max_wait_seconds), True
+    if target.tzinfo is None:
+        target = target.replace(tzinfo=timezone.utc)
+    wait_seconds = max(0, int((target.astimezone(timezone.utc) - now).total_seconds()))
+    capped = wait_seconds > max_wait_seconds
+    if capped:
+        return max_wait_seconds, True
+    return wait_seconds, False
 
 
 def _print_symbol_health_summary(results) -> None:
@@ -255,6 +305,70 @@ def print_broker_result(order_id: str, broker_order_id: str | None) -> None:
     """Print one MT5 demo submission result."""
 
     print(f"broker_submit=ok mode=mt5_demo paper_order_id={order_id} broker_order_id={broker_order_id or '-'}")
+
+
+def print_execution_gate_explanations(
+    result: DemoBotCycleResult,
+    database: Database,
+    settings: AppSettings,
+    broker_mode: str,
+    *,
+    account=None,
+    mt5=None,
+) -> None:
+    """Print strict MT5 demo gate diagnostics for this cycle."""
+
+    paper_orders = {order.order_id: order for order in database.load_paper_orders()}
+    for decision in result.decisions:
+        if not decision.order_ids:
+            reasons = "; ".join(decision.reasons) if decision.reasons else "no paper order was created"
+            print(
+                "demo_execution_gate=blocked "
+                f"symbol={decision.symbol} status={decision.status} setup={decision.setup_subtype} "
+                f"reason=signal did not create a paper order; {reasons}"
+            )
+            continue
+        for order_id in decision.order_ids:
+            paper_order = paper_orders.get(order_id)
+            if paper_order is None:
+                print(f"demo_execution_gate=blocked paper_order_id={order_id} reason=paper order was not found")
+                continue
+            gate = evaluate_order_execution_gate(
+                settings,
+                database,
+                paper_order,
+                broker_mode=broker_mode,
+                account=account,
+                mt5=mt5,
+            )
+            print(format_demo_execution_gate_result(order_id, gate))
+
+
+def evaluate_order_execution_gate(
+    settings: AppSettings,
+    database: Database,
+    paper_order: ExecutionOrder,
+    *,
+    broker_mode: str,
+    account=None,
+    mt5=None,
+    mt5_symbol: str | None = None,
+    symbol_info=None,
+):
+    """Evaluate the strict MT5 demo gate for one created paper order."""
+
+    return evaluate_demo_execution_gate(
+        DemoExecutionGateContext(
+            settings=settings,
+            order=paper_order,
+            broker_mode=broker_mode,
+            existing_orders=database.load_paper_orders(),
+            account=account,
+            mt5=mt5,
+            mt5_symbol=mt5_symbol,
+            symbol_info=symbol_info,
+        )
+    )
 
 
 def print_cycle_result(result: DemoBotCycleResult) -> None:

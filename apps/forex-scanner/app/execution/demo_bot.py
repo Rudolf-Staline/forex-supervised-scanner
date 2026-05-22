@@ -17,6 +17,7 @@ from app.data.providers import MarketDataProvider
 from app.execution.demo_bot_config import DemoBotConfig, EXECUTABLE_DEMO_STATUSES
 from app.execution.models import ExecutionOrder, TradeEvent, TradeEventType
 from app.execution.rejected_signals import RejectedSignalRecord
+from app.journal.trade_journal import append_trade_journal, decision_to_journal_record
 from app.market.sessions import get_market_session
 from app.paper.trading import submit_signal_to_paper
 from app.risk.daily_limits import DailyRiskConfig, DailyRiskSummary, evaluate_daily_limits, summarize_daily_risk
@@ -79,12 +80,14 @@ class DemoBotService:
         decisions: list[DemoBotDecision] = []
         created_orders: list[ExecutionOrder] = []
         rejected_records: list[RejectedSignalRecord] = []
+        journal_records = []
         if controls.maintenance_mode:
             logs.append("Operator maintenance mode is active; every opportunity will be blocked.")
         if controls.degraded_mode:
             logs.append("Operator degraded mode is active; every opportunity will be blocked.")
 
         for opportunity in report.opportunities:
+            created_order: ExecutionOrder | None = None
             decision = self._decide(
                 opportunity,
                 existing_orders=[*existing_orders, *created_orders],
@@ -95,6 +98,7 @@ class DemoBotService:
             if decision.accepted:
                 submission = submit_signal_to_paper(opportunity, settings=self.settings, database=self.database, source="demo_bot")
                 if submission.order:
+                    created_order = submission.order
                     created_orders.append(submission.order)
                     decision.order_ids.append(submission.order.order_id)
                     logs.append(
@@ -116,11 +120,24 @@ class DemoBotService:
                     f"detected_patterns={','.join(decision.detected_patterns) or '-'} pattern_score={decision.pattern_score:.2f}."
                 )
             decisions.append(decision)
+            journal_records.append(
+                decision_to_journal_record(
+                    cycle_id=cycle_id,
+                    opportunity=opportunity,
+                    decision=decision,
+                    order=created_order,
+                    timestamp=started,
+                    broker_mode=os.getenv("BROKER_MODE", "paper"),
+                    mode=self.settings.execution.mode,
+                    risk_percent=self._risk_per_trade_percent(),
+                )
+            )
             events.append(_decision_event(cycle_id, opportunity, decision, started))
             if not decision.accepted:
                 rejected_records.append(_rejected_signal_record(cycle_id, opportunity, decision, started, watchlist=watchlist))
 
         self.database.rebuild_trading_journal()
+        append_trade_journal(journal_records)
         completed = datetime.now(timezone.utc)
         risk_summary = summarize_daily_risk(
             [*existing_orders, *created_orders],
