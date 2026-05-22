@@ -9,9 +9,11 @@ from datetime import datetime
 from _demo_bot_cli import (
     add_cycle_arguments,
     created_order_ids,
+    filter_tradable_session_symbols_if_requested,
     filter_unhealthy_symbols_if_requested,
     load_demo_runtime,
     normalize_symbols,
+    print_next_session_windows,
     print_broker_result,
     print_cycle_result,
 )
@@ -36,19 +38,29 @@ def main() -> None:
     )
     config = DemoBotConfig.from_settings(settings)
     style = TradingStyle(args.style)
-    symbols = normalize_symbols(args.symbols, args.watchlist, args.asset_class)
-    symbols = filter_unhealthy_symbols_if_requested(symbols, args.skip_unhealthy_symbols, args.provider)
+    base_symbols = normalize_symbols(args.symbols, args.watchlist, args.asset_class)
+    base_symbols = filter_unhealthy_symbols_if_requested(base_symbols, args.skip_unhealthy_symbols, args.provider)
+    if args.show_next_windows:
+        print_next_session_windows(base_symbols)
     service = DemoBotService(settings, provider, database)
 
     print(
         "demo_bot=started "
         f"mode=paper broker={args.broker} provider={provider.name} interval_seconds={config.interval_seconds} "
-        f"style={style.value} symbols={','.join(symbols)}"
+        f"style={style.value} symbols={','.join(base_symbols)}"
     )
     print("Press Ctrl+C to stop.")
     try:
         while True:
             print(f"cycle_start={datetime.now().isoformat(timespec='seconds')}")
+            symbols = filter_tradable_session_symbols_if_requested(base_symbols, args.only_tradable_session)
+            if not symbols:
+                if args.show_next_windows:
+                    print_next_session_windows(base_symbols)
+                print("cycle=skipped reason=no_tradable_symbols_now orders_created=0")
+                print(f"sleep_seconds={config.interval_seconds}")
+                time.sleep(config.interval_seconds)
+                continue
             result = service.run_cycle(style, symbols, watchlist=args.watchlist)
             print_cycle_result(result)
             if args.broker == "mt5_demo":

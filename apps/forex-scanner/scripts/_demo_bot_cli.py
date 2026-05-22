@@ -6,6 +6,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from datetime import datetime, timezone
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -16,12 +17,13 @@ from app.config.env import load_dotenv
 from app.config.safety import ensure_mt5_demo_safe_mode
 from app.config.settings import AppSettings, load_settings
 from app.config.watchlists import get_watchlist, watchlist_names
-from app.config.instruments import filter_symbols_by_asset_class
+from app.config.instruments import AssetClass, filter_symbols_by_asset_class, instrument_for_symbol
 from app.core.types import TradingStyle
 from app.data.mt5_symbols_health import split_healthy_symbols, summarize_symbol_health
 from app.data.mt5_symbol_resolver import set_mt5_symbol_overrides
 from app.data.providers import DEBUG_MARKET_DATA_ENV, DataProviderError, MarketDataProvider, build_provider
 from app.execution.demo_bot import DemoBotCycleResult
+from app.market.sessions import get_market_session
 from app.storage.database import Database
 from app.utils.logging import configure_logging
 
@@ -66,6 +68,16 @@ def add_cycle_arguments(parser: argparse.ArgumentParser) -> None:
         "--skip-unhealthy-symbols",
         action="store_true",
         help="For MT5 data runs, diagnose watchlist symbols first and skip symbols with bars=0 or non-tradable status.",
+    )
+    parser.add_argument(
+        "--only-tradable-session",
+        action="store_true",
+        help="Skip symbols that are currently outside their configured asset-class demo session before scanning.",
+    )
+    parser.add_argument(
+        "--show-next-windows",
+        action="store_true",
+        help="Print current UTC time and next configured demo-session windows.",
     )
 
 
@@ -144,6 +156,69 @@ def filter_unhealthy_symbols_if_requested(symbols: list[str], enabled: bool, pro
     return healthy
 
 
+def filter_tradable_session_symbols_if_requested(
+    symbols: list[str],
+    enabled: bool,
+    *,
+    now_utc: datetime | None = None,
+) -> list[str]:
+    """Optionally skip symbols outside configured asset-class demo sessions."""
+
+    if not enabled:
+        return symbols
+    now = now_utc or datetime.now(timezone.utc)
+    tradable: list[str] = []
+    next_windows: list[str] = []
+    for symbol in symbols:
+        instrument = instrument_for_symbol(symbol)
+        session = get_market_session(now, instrument.asset_class, symbol)
+        if session.is_tradable_session:
+            tradable.append(symbol)
+            continue
+        next_windows.append(session.next_tradable_window)
+        print(
+            "skipped_off_hours "
+            f"symbol={symbol} asset_class={session.asset_class} session_name={session.session_name} "
+            f"next_tradable_window=\"{session.next_tradable_window}\""
+        )
+    if not tradable:
+        print("no_tradable_symbols_now=true")
+        print(f"recommended_next_run_time={recommended_next_run_time(next_windows)}")
+    return tradable
+
+
+def print_next_session_windows(symbols: list[str] | None = None, *, now_utc: datetime | None = None) -> None:
+    """Print the next configured demo-session windows for each asset class."""
+
+    now = now_utc or datetime.now(timezone.utc)
+    print(f"current_utc_time={now.isoformat(timespec='seconds')}")
+    windows: dict[AssetClass, str] = {}
+    for asset_class in AssetClass:
+        sample_symbol = _sample_symbol_for_asset_class(asset_class, symbols)
+        windows[asset_class] = get_market_session(now, asset_class, sample_symbol).next_tradable_window
+    print(f"next_forex_window={windows[AssetClass.FOREX]}")
+    print(f"next_commodities_window={windows[AssetClass.COMMODITIES]}")
+    print(f"next_indices_window={windows[AssetClass.INDICES]}")
+    print(f"recommended_next_run_time={recommended_next_run_time(list(windows.values()))}")
+
+
+def recommended_next_run_time(next_windows: list[str]) -> str:
+    """Return the earliest readable next-run timestamp found in session-window strings."""
+
+    candidates: list[str] = []
+    for window in next_windows:
+        if not window or window.startswith("no configured"):
+            continue
+        if "now until " in window:
+            return "now"
+        parts = window.split()
+        for part in parts:
+            if "T" in part and "+" in part:
+                candidates.append(part)
+                break
+    return min(candidates) if candidates else "no configured tradable window found"
+
+
 def _print_symbol_health_summary(results) -> None:
     summary = summarize_symbol_health(results)
     print("Symbol health summary:")
@@ -152,6 +227,18 @@ def _print_symbol_health_summary(results) -> None:
     print(f"- highest_spread_atr_symbols: {','.join(summary['highest_spread_atr_symbols']) or '-'}")
     print(f"- lowest_spread_atr_symbols: {','.join(summary['lowest_spread_atr_symbols']) or '-'}")
     print(f"- recommended_watchlist_for_demo: {','.join(summary['recommended_watchlist_for_demo']) or '-'}")
+
+
+def _sample_symbol_for_asset_class(asset_class: AssetClass, symbols: list[str] | None = None) -> str:
+    for symbol in symbols or []:
+        if instrument_for_symbol(symbol).asset_class == asset_class:
+            return symbol
+    defaults = {
+        AssetClass.FOREX: "EUR/USD",
+        AssetClass.COMMODITIES: "XAU/USD",
+        AssetClass.INDICES: "US500",
+    }
+    return defaults[asset_class]
 
 
 def _normalize_symbol(symbol: str) -> str:

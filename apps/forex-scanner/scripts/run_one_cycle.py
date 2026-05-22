@@ -7,9 +7,11 @@ import argparse
 from _demo_bot_cli import (
     add_cycle_arguments,
     created_order_ids,
+    filter_tradable_session_symbols_if_requested,
     filter_unhealthy_symbols_if_requested,
     load_demo_runtime,
     normalize_symbols,
+    print_next_session_windows,
     print_broker_result,
     print_cycle_result,
 )
@@ -34,6 +36,12 @@ def main() -> None:
     style = TradingStyle(args.style)
     symbols = normalize_symbols(args.symbols, args.watchlist, args.asset_class)
     symbols = filter_unhealthy_symbols_if_requested(symbols, args.skip_unhealthy_symbols, args.provider)
+    if args.show_next_windows:
+        print_next_session_windows(symbols)
+    symbols = filter_tradable_session_symbols_if_requested(symbols, args.only_tradable_session)
+    if not symbols:
+        print("cycle=skipped reason=no_tradable_symbols_now orders_created=0")
+        return
     print(f"runtime provider={provider.name} broker={args.broker} mode=paper")
     result = DemoBotService(settings, provider, database).run_cycle(style, symbols, watchlist=args.watchlist)
     print_cycle_result(result)
