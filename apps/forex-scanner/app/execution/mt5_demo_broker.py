@@ -16,8 +16,9 @@ from typing import Any
 
 from app.config.safety import DemoSafetyError, ensure_mt5_demo_safe_mode
 from app.config.settings import AppSettings
-from app.config.instruments import AssetClass, canonical_symbol, instrument_for_symbol, resolve_mt5_symbol_from_candidates
+from app.config.instruments import AssetClass, canonical_symbol, instrument_for_symbol
 from app.core.types import DirectionBias
+from app.data.mt5_symbol_resolver import MT5SymbolResolver
 from app.execution.broker import BrokerExecutionError, append_broker_transition
 from app.execution.models import BrokerAccountState, BrokerErrorCategory, BrokerOrderState, ExecutionOrder, OrderRequest, OrderStatus, TradeEventType
 from app.execution.mt5_filling import filling_attempts_payload, resolve_mt5_filling_mode_or_try_fallbacks
@@ -48,21 +49,14 @@ class MT5SymbolMapper:
     def map_symbol(self, internal_symbol: str) -> str:
         """Return a selected MT5 symbol or raise for unknown symbols."""
 
-        target = _canonical_symbol(internal_symbol)
-        if not target:
+        if not _canonical_symbol(internal_symbol):
             raise BrokerExecutionError(f"unknown MT5 symbol mapping for {internal_symbol}", BrokerErrorCategory.CONFIGURATION)
-        available = self.available_symbols()
-        resolved = resolve_mt5_symbol_from_candidates(internal_symbol, available)
-        resolved_target = _canonical_symbol(resolved)
-        matches = [symbol for symbol in available if symbol == resolved or _canonical_symbol(symbol).startswith(resolved_target or target)]
-        if not matches:
+        resolution = MT5SymbolResolver(self.mt5, require_bars=False).resolve(internal_symbol, require_bars=False)
+        if not resolution.ok or not resolution.mt5_symbol:
+            if resolution.reason == "symbol_select_failed" and resolution.mt5_symbol:
+                raise BrokerExecutionError(f"MT5 symbol {resolution.mt5_symbol} could not be selected", BrokerErrorCategory.CONFIGURATION)
             raise BrokerExecutionError(f"unknown MT5 symbol mapping for {internal_symbol}", BrokerErrorCategory.CONFIGURATION)
-        exact = [symbol for symbol in matches if _canonical_symbol(symbol) == target]
-        selected = sorted(exact or matches, key=lambda value: (len(value), value))[0]
-        symbol_select = getattr(self.mt5, "symbol_select", None)
-        if callable(symbol_select) and not bool(symbol_select(selected, True)):
-            raise BrokerExecutionError(f"MT5 symbol {selected} could not be selected", BrokerErrorCategory.CONFIGURATION)
-        return selected
+        return resolution.mt5_symbol
 
     def available_symbols(self) -> list[str]:
         symbols_get = getattr(self.mt5, "symbols_get", None)

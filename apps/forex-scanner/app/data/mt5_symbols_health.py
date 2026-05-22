@@ -8,10 +8,11 @@ from typing import Iterable
 
 import pandas as pd
 
-from app.config.instruments import AssetClass, filter_symbols_by_asset_class, instrument_for_symbol, resolve_mt5_symbol_from_candidates, symbols_for_asset_class
+from app.config.instruments import AssetClass, enabled_instrument_symbols, filter_symbols_by_asset_class, instrument_for_symbol, resolve_mt5_symbol_from_candidates, symbols_for_asset_class
 from app.config.settings import AppSettings, load_settings
 from app.config.watchlists import get_watchlist
 from app.core.types import Timeframe
+from app.data.mt5_symbol_resolver import MT5SymbolResolver
 from app.data.providers import DataProviderError, initialize_mt5_terminal, mt5_last_error, mt5_rates_to_ohlcv, to_mt5_symbol
 from app.data.validation import pip_size
 
@@ -88,6 +89,8 @@ def resolve_symbols_for_asset_class(symbols: list[str] | None, watchlist: str | 
 
     if symbols or watchlist:
         return filter_symbols_by_asset_class(resolve_symbols(symbols, watchlist), asset_class)
+    if asset_class == "all":
+        return enabled_instrument_symbols()
     if asset_class and asset_class != "all":
         return symbols_for_asset_class(AssetClass(asset_class))
     return resolve_symbols(None, None)
@@ -130,7 +133,8 @@ def diagnose_symbol(
     """Inspect one MT5 symbol across H1, M15, and M5."""
 
     config = instrument_for_symbol(symbol)
-    mt5_symbol = _resolve_health_mt5_symbol(mt5, symbol)
+    resolution = MT5SymbolResolver(mt5, bars=bars, require_bars=True).resolve(symbol, require_bars=True)
+    mt5_symbol = resolution.mt5_symbol or to_mt5_symbol(symbol)
     selected = bool(mt5.symbol_select(mt5_symbol, True))
     info = mt5.symbol_info(mt5_symbol)
     visible = bool(getattr(info, "visible", False)) if info is not None else False
@@ -146,6 +150,8 @@ def diagnose_symbol(
     spread_atr = None if spread is None or atr is None or atr <= 0 else round(spread / atr, 4)
     last_error = mt5_last_error(mt5)
     reason = _health_reason(selected, visible, tradable, timeframe_results)
+    if not resolution.ok and resolution.reason in {"symbol_unavailable", "symbol_select_failed", "symbol_not_tradable"}:
+        reason = resolution.reason
     return SymbolHealth(
         symbol=symbol,
         mt5_symbol=mt5_symbol,
@@ -395,14 +401,3 @@ def _failed_symbol_health(symbol: str, mt5: object, reason: str) -> SymbolHealth
         reason=reason,
         timeframes=[TimeframeHealth(timeframe=timeframe, bars=0, last_candle="", error=reason) for timeframe in HEALTH_TIMEFRAMES],
     )
-
-
-def _resolve_health_mt5_symbol(mt5: object, symbol: str) -> str:
-    symbols_get = getattr(mt5, "symbols_get", None)
-    available: list[str] = []
-    if callable(symbols_get):
-        try:
-            available = [str(getattr(row, "name", row)) for row in (symbols_get() or []) if str(getattr(row, "name", row)).strip()]
-        except Exception:
-            available = []
-    return resolve_mt5_symbol_from_candidates(symbol, available)

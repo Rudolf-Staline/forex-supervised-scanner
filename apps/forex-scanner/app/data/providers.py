@@ -13,8 +13,8 @@ import numpy as np
 import pandas as pd
 
 from app.config.settings import AppSettings, ProviderSettings
-from app.config.instruments import canonical_symbol, resolve_mt5_symbol_from_candidates
 from app.core.types import TIMEFRAME_MINUTES, TIMEFRAME_PANDAS_RULE, Timeframe
+from app.data.mt5_symbol_resolver import MT5SymbolResolver, mt5_symbol_override_for
 from app.data.validation import attach_data_quality, pip_size, validate_ohlcv, window_for_bars
 
 LOGGER = logging.getLogger(__name__)
@@ -297,6 +297,7 @@ class MetaTrader5Provider(MarketDataProvider):
 
     def __init__(self, settings: ProviderSettings) -> None:
         self.settings = settings
+        self._resolver: MT5SymbolResolver | None = None
 
     def get_ohlcv(
         self,
@@ -318,11 +319,11 @@ class MetaTrader5Provider(MarketDataProvider):
             )
             raise DataProviderError("MetaTrader5 Python package is not installed") from exc
 
-        mapped_symbol = _resolve_mt5_market_symbol(mt5, symbol)
         tf_constant = getattr(mt5, self._TIMEFRAMES[timeframe])
         request_end = end or datetime.now(timezone.utc)
         try:
             initialize_mt5_terminal(mt5)
+            mapped_symbol = _resolve_mt5_market_symbol(mt5, symbol, self)
             selected = bool(mt5.symbol_select(mapped_symbol, True))
             last_error = mt5_last_error(mt5)
             _log_mt5_debug(
@@ -383,6 +384,7 @@ class MetaTrader5Provider(MarketDataProvider):
         except DataProviderError:
             raise
         except Exception as exc:
+            mapped_symbol = mt5_symbol_override_for(symbol) or to_mt5_symbol(symbol)
             raise DataProviderError(
                 f"MT5 provider failed for {symbol} -> {mapped_symbol} {timeframe.value}: "
                 f"{exc}; last_error={mt5_last_error(mt5)}"
@@ -425,18 +427,13 @@ def to_mt5_symbol(symbol: str) -> str:
     return "".join(char for char in symbol.upper() if char.isalnum())
 
 
-def _resolve_mt5_market_symbol(mt5: object, symbol: str) -> str:
-    symbols_get = getattr(mt5, "symbols_get", None)
-    if not callable(symbols_get):
-        return resolve_mt5_symbol_from_candidates(symbol)
-    try:
-        available = [str(getattr(row, "name", row)) for row in (symbols_get() or []) if str(getattr(row, "name", row)).strip()]
-    except Exception:
-        available = []
-    resolved = resolve_mt5_symbol_from_candidates(symbol, available)
-    if resolved:
-        return resolved
-    return canonical_symbol(symbol)
+def _resolve_mt5_market_symbol(mt5: object, symbol: str, provider: MetaTrader5Provider) -> str:
+    if provider._resolver is None:
+        provider._resolver = MT5SymbolResolver(mt5, bars=120, require_bars=True)
+    resolution = provider._resolver.resolve(symbol, require_bars=True)
+    if not resolution.ok or not resolution.mt5_symbol:
+        raise DataProviderError(f"MT5 symbol resolution failed for {symbol}: reason={resolution.reason}")
+    return resolution.mt5_symbol
 
 
 def mt5_rates_to_ohlcv(

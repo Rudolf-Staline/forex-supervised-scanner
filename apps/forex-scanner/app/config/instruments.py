@@ -105,7 +105,7 @@ INSTRUMENTS.update(
         ),
         "WTI/OIL": InstrumentConfig(
             logical_symbol="WTI/OIL",
-            mt5_symbol_candidates=["WTI", "WTIUSD", "USOIL", "Oil_WTI", "USOil"],
+            mt5_symbol_candidates=["US Oil", "USOil", "USOIL", "WTI", "WTIUSD", "Oil_WTI"],
             asset_class=AssetClass.COMMODITIES,
             scan_only=True,
             notes="WTI/oil logical symbol; broker symbol varies.",
@@ -113,7 +113,7 @@ INSTRUMENTS.update(
         ),
         "BRENT/OIL": InstrumentConfig(
             logical_symbol="BRENT/OIL",
-            mt5_symbol_candidates=["BRENT", "BRENTUSD", "UKOIL", "Oil_Brent", "UKOil"],
+            mt5_symbol_candidates=["UK Brent Oil", "UKBrentOil", "UKOIL", "BRENT", "BRENTUSD", "Oil_Brent"],
             asset_class=AssetClass.COMMODITIES,
             scan_only=True,
             notes="Brent/oil logical symbol; broker symbol varies.",
@@ -129,7 +129,7 @@ INSTRUMENTS.update(
         ),
         "US30": InstrumentConfig(
             logical_symbol="US30",
-            mt5_symbol_candidates=["US30", "DJ30", "DOW", "WallStreet30"],
+            mt5_symbol_candidates=["Wall Street 30", "WallStreet30", "US30", "DJ30", "DOW"],
             asset_class=AssetClass.INDICES,
             scan_only=True,
             notes="US30 logical index; broker symbol varies.",
@@ -137,7 +137,7 @@ INSTRUMENTS.update(
         ),
         "NAS100": InstrumentConfig(
             logical_symbol="NAS100",
-            mt5_symbol_candidates=["NAS100", "NASDAQ", "USTEC", "US100"],
+            mt5_symbol_candidates=["US Tech 100", "USTech100", "NAS100", "NASDAQ", "USTEC", "US100"],
             asset_class=AssetClass.INDICES,
             scan_only=True,
             notes="NASDAQ logical index; broker symbol varies.",
@@ -145,7 +145,7 @@ INSTRUMENTS.update(
         ),
         "GER40": InstrumentConfig(
             logical_symbol="GER40",
-            mt5_symbol_candidates=["GER40", "DAX", "DE40", "Germany40"],
+            mt5_symbol_candidates=["Germany 40", "Germany40", "GER40", "DAX", "DE40"],
             asset_class=AssetClass.INDICES,
             scan_only=True,
             notes="GER40 logical index; broker symbol varies.",
@@ -153,7 +153,7 @@ INSTRUMENTS.update(
         ),
         "UK100": InstrumentConfig(
             logical_symbol="UK100",
-            mt5_symbol_candidates=["UK100", "FTSE", "FTSE100"],
+            mt5_symbol_candidates=["UK 100", "UK100", "FTSE", "FTSE100"],
             asset_class=AssetClass.INDICES,
             scan_only=True,
             notes="UK100 logical index; broker symbol varies.",
@@ -161,7 +161,7 @@ INSTRUMENTS.update(
         ),
         "FRA40": InstrumentConfig(
             logical_symbol="FRA40",
-            mt5_symbol_candidates=["FRA40", "CAC40", "France40"],
+            mt5_symbol_candidates=["France 40", "France40", "FRA40", "CAC40"],
             asset_class=AssetClass.INDICES,
             scan_only=True,
             notes="FRA40 logical index; broker symbol varies.",
@@ -183,6 +183,12 @@ def symbols_for_asset_class(asset_class: AssetClass | str) -> list[str]:
 
     wanted = AssetClass(asset_class)
     return [symbol for symbol, config in INSTRUMENTS.items() if config.enabled and config.asset_class == wanted]
+
+
+def enabled_instrument_symbols() -> list[str]:
+    """Return every enabled logical instrument symbol."""
+
+    return [symbol for symbol, config in INSTRUMENTS.items() if config.enabled]
 
 
 def filter_symbols_by_asset_class(symbols: list[str], asset_class: AssetClass | str | None) -> list[str]:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.config.instruments import AssetClass, filter_symbols_by_asset_class, instrument_for_symbol, resolve_mt5_symbol_from_candidates
+from app.config.instruments import AssetClass, enabled_instrument_symbols, filter_symbols_by_asset_class, instrument_for_symbol, resolve_mt5_symbol_from_candidates
 from app.config.watchlists import get_watchlist
 
 
@@ -28,6 +28,14 @@ def test_multi_asset_watchlists_exist() -> None:
     assert "NAS100" in get_watchlist("indices_demo")
     assert "XAU/USD" in get_watchlist("multi_asset_demo")
     assert "EUR/USD" in get_watchlist("multi_asset_demo")
+
+
+def test_enabled_instrument_symbols_include_all_asset_classes() -> None:
+    symbols = enabled_instrument_symbols()
+
+    assert "EUR/USD" in symbols
+    assert "XAU/USD" in symbols
+    assert "NAS100" in symbols
 
 
 def test_asset_class_filtering_keeps_only_requested_symbols() -> None:

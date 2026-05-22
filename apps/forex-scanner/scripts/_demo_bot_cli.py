@@ -19,6 +19,7 @@ from app.config.watchlists import get_watchlist, watchlist_names
 from app.config.instruments import filter_symbols_by_asset_class
 from app.core.types import TradingStyle
 from app.data.mt5_symbols_health import split_healthy_symbols, summarize_symbol_health
+from app.data.mt5_symbol_resolver import set_mt5_symbol_overrides
 from app.data.providers import DEBUG_MARKET_DATA_ENV, DataProviderError, MarketDataProvider, build_provider
 from app.execution.demo_bot import DemoBotCycleResult
 from app.storage.database import Database
@@ -114,8 +115,10 @@ def filter_unhealthy_symbols_if_requested(symbols: list[str], enabled: bool, pro
     """Optionally remove MT5 symbols that cannot provide usable demo data."""
 
     if not enabled:
+        set_mt5_symbol_overrides({})
         return symbols
     if provider_name != "mt5":
+        set_mt5_symbol_overrides({})
         print(f"symbol_health=skipped reason=provider_is_{provider_name}")
         return symbols
     try:
@@ -125,6 +128,10 @@ def filter_unhealthy_symbols_if_requested(symbols: list[str], enabled: bool, pro
     for result in results:
         action = "use" if result.healthy else "skip"
         spread_atr = "n/a" if result.spread_atr is None else f"{result.spread_atr:.4f}"
+        if result.healthy:
+            print(f"symbol_resolved logical={result.symbol} mt5_symbol=\"{result.mt5_symbol}\"")
+        else:
+            print(f"symbol_skipped logical={result.symbol} reason={result.reason}")
         print(
             "symbol_health "
             f"symbol={result.symbol} mt5_symbol={result.mt5_symbol} action={action} status={result.status} "
@@ -133,6 +140,7 @@ def filter_unhealthy_symbols_if_requested(symbols: list[str], enabled: bool, pro
     _print_symbol_health_summary(results)
     if not healthy:
         raise SystemExit("no healthy MT5 symbols remain after --skip-unhealthy-symbols")
+    set_mt5_symbol_overrides({result.symbol: result.mt5_symbol for result in results if result.healthy})
     return healthy
 
 
