@@ -31,6 +31,7 @@ from app.execution.operator_identity import ApprovalSignature, OperatorAuthSessi
 from app.execution.operator_workflows import HandoverRecord, LiveAuthorizationRecord, OperatorActionRecord, PreSessionChecklist, TradingSessionRecord
 from app.execution.operations import BrokerHealthSnapshot, BrokerIncident, OperationalAlert, OperationalMetric, OperatorControlState
 from app.execution.reconciliation import ReconciliationAnomaly, ReconciliationReport
+from app.execution.rejected_signals import RejectedSignalRecord
 from app.execution.soak import SoakAnomaly, SoakCampaign, SoakRun, SoakSample
 from app.paper.journal import TradeJournalEntry, all_trade_events, journal_entries_from_orders
 from app.scoring.empirical import EmpiricalQuery, estimate_empirical_score
@@ -140,6 +141,29 @@ class Database:
                     symbol TEXT NOT NULL,
                     status TEXT NOT NULL,
                     reason TEXT,
+                    payload_json TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS rejected_signals (
+                    id TEXT PRIMARY KEY,
+                    cycle_id TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    setup TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    score REAL,
+                    risk_reward REAL,
+                    market_regime TEXT,
+                    spread_atr REAL,
+                    rejection_reasons_json TEXT NOT NULL,
+                    entry REAL,
+                    stop_loss REAL,
+                    tp1 REAL,
+                    tp2 REAL,
+                    tp3 REAL,
+                    provider TEXT,
+                    broker TEXT,
+                    style TEXT,
                     payload_json TEXT NOT NULL
                 );
 
@@ -822,6 +846,55 @@ class Database:
         with self._connect() as connection:
             rows = connection.execute(query, parameters).fetchall()
         return [TradeEvent.model_validate_json(str(row["payload_json"])) for row in rows]
+
+    def save_rejected_signals(self, records: list[RejectedSignalRecord]) -> None:
+        """Persist rejected scanner signals for strategy diagnostics."""
+
+        rows = [
+            (
+                record.id,
+                record.cycle_id,
+                record.timestamp.isoformat(),
+                record.symbol,
+                record.setup,
+                record.status,
+                record.score,
+                record.risk_reward,
+                record.market_regime,
+                record.spread_atr,
+                json.dumps(record.rejection_reasons),
+                record.entry,
+                record.stop_loss,
+                record.tp1,
+                record.tp2,
+                record.tp3,
+                record.provider,
+                record.broker,
+                record.style,
+                record.model_dump_json(),
+            )
+            for record in records
+        ]
+        if not rows:
+            return
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                INSERT OR REPLACE INTO rejected_signals (
+                    id, cycle_id, timestamp, symbol, setup, status, score, risk_reward,
+                    market_regime, spread_atr, rejection_reasons_json, entry, stop_loss,
+                    tp1, tp2, tp3, provider, broker, style, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+
+    def load_rejected_signals(self) -> list[RejectedSignalRecord]:
+        """Load rejected scanner signals in chronological order."""
+
+        with self._connect() as connection:
+            rows = connection.execute("SELECT payload_json FROM rejected_signals ORDER BY timestamp").fetchall()
+        return [RejectedSignalRecord.model_validate_json(str(row["payload_json"])) for row in rows]
 
     def save_journal_entries(self, entries: list[TradeJournalEntry]) -> None:
         """Persist queryable trading journal entries."""

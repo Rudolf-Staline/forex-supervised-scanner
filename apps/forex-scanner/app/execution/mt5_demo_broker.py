@@ -20,6 +20,7 @@ from app.core.types import DirectionBias
 from app.execution.broker import BrokerExecutionError, append_broker_transition
 from app.execution.models import BrokerAccountState, BrokerErrorCategory, BrokerOrderState, ExecutionOrder, OrderRequest, OrderStatus, TradeEventType
 from app.execution.mt5_filling import filling_attempts_payload, resolve_mt5_filling_mode_or_try_fallbacks
+from app.risk.position_sizing import PositionSizeResult, calculate_position_size
 
 MT5_DEMO_MODE = "mt5_demo"
 MT5_LOGIN_ENV = "MT5_LOGIN"
@@ -27,7 +28,11 @@ MT5_PASSWORD_ENV = "MT5_PASSWORD"
 MT5_SERVER_ENV = "MT5_SERVER"
 MT5_PATH_ENV = "MT5_PATH"
 DERIV_DEMO_SERVER = "Deriv-Demo"
-MAX_DEMO_VOLUME_LOTS = 0.01
+RISK_PER_TRADE_PERCENT_ENV = "RISK_PER_TRADE_PERCENT"
+MAX_VOLUME_PER_TRADE_ENV = "MAX_VOLUME_PER_TRADE"
+POSITION_SIZING_MODE_ENV = "POSITION_SIZING_MODE"
+DEFAULT_RISK_PER_TRADE_PERCENT = 0.25
+DEFAULT_MAX_VOLUME_PER_TRADE = 0.05
 
 LOGGER = logging.getLogger(__name__)
 
@@ -156,8 +161,19 @@ class MT5DemoBroker:
         symbol_info = getattr(mt5, "symbol_info")(symbol)
         if symbol_info is None:
             raise BrokerExecutionError(f"MT5 demo symbol_info unavailable for {symbol}", BrokerErrorCategory.CONNECTIVITY)
-        demo_volume = min(float(self.settings.broker.default_volume_lots), MAX_DEMO_VOLUME_LOTS)
-        broker_request = request.model_copy(update={"quantity_units": demo_volume})
+        sizing = _demo_position_size(account, request, symbol_info)
+        broker_request = request.model_copy(update={"quantity_units": sizing.final_volume})
+        LOGGER.info(
+            "MT5 demo position sizing",
+            extra={
+                "symbol": symbol,
+                "balance": account.balance,
+                "risk_percent": sizing.risk_percent,
+                "calculated_volume": sizing.calculated_volume,
+                "final_volume": sizing.final_volume,
+                "stop_distance": sizing.stop_distance,
+            },
+        )
         base_payload = _order_payload(mt5, symbol, broker_request, float(tick.ask), float(tick.bid), self.settings)
         now = datetime.now(timezone.utc)
         order = ExecutionOrder(
@@ -171,7 +187,18 @@ class MT5DemoBroker:
             broker_name="mt5",
             broker_state=BrokerOrderState.INTENT_CREATED,
             broker_submission={key: value for key, value in base_payload.items() if key != "password"},
-            execution_assumptions={"broker": "mt5", "mode": MT5_DEMO_MODE, "live_money": False, "demo_only": True},
+            execution_assumptions={
+                "broker": "mt5",
+                "mode": MT5_DEMO_MODE,
+                "live_money": False,
+                "demo_only": True,
+                "position_sizing_mode": os.getenv(POSITION_SIZING_MODE_ENV, "auto").strip().lower() or "auto",
+                "balance": account.balance or 0.0,
+                "risk_percent": sizing.risk_percent,
+                "calculated_volume": sizing.calculated_volume,
+                "final_volume": sizing.final_volume,
+                "stop_distance": sizing.stop_distance,
+            },
         )
         order = append_broker_transition(order, BrokerOrderState.INTENT_CREATED, TradeEventType.BROKER_INTENT_CREATED, now)
         order = append_broker_transition(order, BrokerOrderState.PRETRADE_VALIDATED, TradeEventType.BROKER_PRETRADE_VALIDATED, now)
@@ -259,6 +286,30 @@ def _pending_order_type(mt5: object, request: OrderRequest, ask: float, bid: flo
     raise BrokerExecutionError("MT5 demo only accepts long or short orders", BrokerErrorCategory.CONFIGURATION)
 
 
+def _demo_position_size(account: BrokerAccountState, request: OrderRequest, symbol_info: object) -> PositionSizeResult:
+    mode = os.getenv(POSITION_SIZING_MODE_ENV, "auto").strip().lower() or "auto"
+    max_volume = _env_float(MAX_VOLUME_PER_TRADE_ENV, DEFAULT_MAX_VOLUME_PER_TRADE)
+    if mode != "auto":
+        fixed_volume = min(float(request.quantity_units), max_volume)
+        return calculate_position_size(
+            balance=account.balance or 1.0,
+            risk_percent=DEFAULT_RISK_PER_TRADE_PERCENT,
+            entry_price=request.entry_price,
+            stop_loss=request.stop_loss,
+            symbol_info=symbol_info,
+            max_volume=fixed_volume,
+        )
+    risk_percent = _env_float(RISK_PER_TRADE_PERCENT_ENV, DEFAULT_RISK_PER_TRADE_PERCENT)
+    return calculate_position_size(
+        balance=account.balance or 0.0,
+        risk_percent=risk_percent,
+        entry_price=request.entry_price,
+        stop_loss=request.stop_loss,
+        symbol_info=symbol_info,
+        max_volume=max_volume,
+    )
+
+
 def _mt5_credentials() -> dict[str, str | int]:
     login = os.getenv(MT5_LOGIN_ENV)
     password = os.getenv(MT5_PASSWORD_ENV)
@@ -319,6 +370,19 @@ def _optional_float(value: object) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def _env_float(name: str, default: float) -> float:
+    raw_value = os.getenv(name)
+    if raw_value is None or raw_value.strip() == "":
+        return default
+    try:
+        value = float(raw_value)
+    except ValueError as exc:
+        raise BrokerExecutionError(f"{name} must be a number", BrokerErrorCategory.CONFIGURATION) from exc
+    if value <= 0:
+        raise BrokerExecutionError(f"{name} must be greater than zero", BrokerErrorCategory.CONFIGURATION)
+    return value
 
 
 def _canonical_symbol(value: str) -> str:

@@ -256,6 +256,9 @@ class RawSetup(BaseModel):
     invalidation_notes: list[str] = Field(default_factory=list)
     missing_conditions: list[str] = Field(default_factory=list)
     watchlist_candidate: bool = False
+    detected_patterns: list[str] = Field(default_factory=list)
+    pattern_score: float = Field(default=0.0, ge=0.0, le=15.0)
+    pattern_explanations: list[str] = Field(default_factory=list)
 
 
 class RiskPlan(BaseModel):
@@ -325,6 +328,9 @@ class Opportunity(BaseModel):
     spread: float | None = Field(default=None, ge=0.0)
     atr: float | None = Field(default=None, ge=0.0)
     key_level_distances: dict[str, float] = Field(default_factory=dict)
+    detected_patterns: list[str] = Field(default_factory=list)
+    pattern_score: float = Field(default=0.0, ge=0.0, le=15.0)
+    pattern_explanations: list[str] = Field(default_factory=list)
     session: SessionName | None = None
     htf_regime: MarketRegime | None = None
     entry_regime: MarketRegime | None = None

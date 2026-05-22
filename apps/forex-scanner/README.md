@@ -72,7 +72,7 @@ BROKER_MODE=paper
 AUTO_BOT_ENABLED=false
 ```
 
-Pour tester un compte FTMO Free Trial via MetaTrader 5, garder `EXECUTION_MODE=paper` et `ALLOW_LIVE_TRADING=false`, puis utiliser un fichier `.env` local non commité :
+Pour tester un compte Deriv-Demo via MetaTrader 5, garder `EXECUTION_MODE=paper` et `ALLOW_LIVE_TRADING=false`, puis utiliser un fichier `.env` local non commité :
 
 ```text
 EXECUTION_MODE=paper
@@ -82,7 +82,7 @@ AUTO_BOT_ENABLED=false
 MT5_DEMO_ONLY=true
 MT5_LOGIN=
 MT5_PASSWORD=
-MT5_SERVER=
+MT5_SERVER=Deriv-Demo
 MT5_PATH=
 ```
 
@@ -103,6 +103,74 @@ python scripts/smoke_check.py
 ```
 
 Le smoke test vérifie la configuration, le scanner et un backtest minimal avec des données de démonstration déterministes.
+
+## Lancement local securise
+
+Ne jamais partager le fichier `.env`. Il peut contenir le login, le serveur et le mot de passe MT5 demo. Le fichier `.env.example` sert uniquement de modele sans identifiants reels.
+
+Verifier la configuration locale sans envoyer d'ordre :
+
+```powershell
+python scripts/health_check.py
+```
+
+Tester le mode paper sans MT5 :
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/windows/test_paper.ps1
+```
+
+Tester la connexion Deriv-Demo, sans ordre :
+
+```powershell
+python scripts/test_mt5_connection.py
+powershell -ExecutionPolicy Bypass -File scripts/windows/test_mt5_connection.ps1
+```
+
+Tester les donnees MT5, sans ordre :
+
+```powershell
+python scripts/test_mt5_market_data.py
+powershell -ExecutionPolicy Bypass -File scripts/windows/test_mt5_data.ps1
+```
+
+Tester un ordre demo minuscule, uniquement apres confirmation manuelle :
+
+```powershell
+python scripts/mt5_place_tiny_demo_order.py --symbol EURUSD
+```
+
+Le script demande exactement `DEMO_ORDER` avant d'appeler MT5. Il doit rester reserve aux tests demo Deriv-Demo.
+
+Lancer un cycle unique avec donnees MT5 et broker paper :
+
+```powershell
+python scripts/run_one_cycle.py --provider mt5 --broker paper
+```
+
+Lancer un cycle unique avec donnees MT5 et broker MT5 demo explicite :
+
+```powershell
+python scripts/run_one_cycle.py --provider mt5 --broker mt5_demo
+powershell -ExecutionPolicy Bypass -File scripts/windows/run_one_cycle_mt5_demo.ps1
+```
+
+Lancer le bot continu en MT5 demo explicite :
+
+```powershell
+python scripts/run_demo_bot.py --provider mt5 --broker mt5_demo
+powershell -ExecutionPolicy Bypass -File scripts/windows/run_bot_mt5_demo.ps1
+```
+
+Arreter le bot continu avec `Ctrl+C`.
+
+Les logs MT5 sont compacts par defaut. Pour diagnostiquer les donnees de marche :
+
+```powershell
+python scripts/run_one_cycle.py --provider mt5 --broker paper --debug-market-data
+```
+
+Le broker `paper` reste le choix par defaut. Le broker `mt5_demo` n'est utilise que si l'utilisateur le demande explicitement avec `--broker mt5_demo` et si les variables demo Deriv sont presentes.
 
 ## Lancement
 

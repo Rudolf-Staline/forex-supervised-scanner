@@ -10,6 +10,7 @@ from app.config.settings import AppSettings, StyleSettings
 from app.core.types import DirectionBias, MarketRegime, RawSetup, RegimeResult, SetupFamily, SetupSubtype, TradingStyle
 from app.indicators.calculations import latest_complete_row
 from app.indicators.levels import LevelSet, nearest_resistance, nearest_support
+from app.setups.chart_patterns import detect_chart_patterns, pattern_score
 
 
 def detect_setups(
@@ -433,6 +434,12 @@ def _build_setup(
     alignment = _alignment_score(direction, higher_regime, entry_regime, trigger_regime)
     activation_quality = _activation_quality(subtype, direction, entry, row, level_price, atr, missing_conditions or [], watchlist_candidate)
     invalidation_quality = _initial_invalidation_quality(direction, entry, atr, stop_candidates, level_price)
+    compatible_patterns = [pattern for pattern in detect_chart_patterns(entry_df) if pattern.direction == direction]
+    detected_patterns = [pattern.pattern_name for pattern in compatible_patterns]
+    pattern_explanations = [pattern.explanation for pattern in compatible_patterns]
+    confluence_score = pattern_score(compatible_patterns, direction)
+    if detected_patterns:
+        explanation = f"{explanation} Pattern confluence: {', '.join(detected_patterns)}."
     return RawSetup(
         symbol=symbol,
         style=style,
@@ -457,6 +464,9 @@ def _build_setup(
         invalidation_notes=[invalidation],
         missing_conditions=missing_conditions or [],
         watchlist_candidate=watchlist_candidate,
+        detected_patterns=detected_patterns,
+        pattern_score=confluence_score,
+        pattern_explanations=pattern_explanations,
     )
 
 

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+import os
+from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
@@ -14,7 +15,9 @@ from app.core.types import DirectionBias, MarketRegime, Opportunity, Opportunity
 from app.data.providers import MarketDataProvider
 from app.execution.demo_bot_config import DemoBotConfig, EXECUTABLE_DEMO_STATUSES
 from app.execution.models import ExecutionOrder, TradeEvent, TradeEventType
+from app.execution.rejected_signals import RejectedSignalRecord
 from app.paper.trading import submit_signal_to_paper
+from app.risk.daily_limits import DailyRiskConfig, DailyRiskSummary, evaluate_daily_limits, summarize_daily_risk
 from app.storage.database import Database
 
 
@@ -29,6 +32,8 @@ class DemoBotDecision(BaseModel):
     order_ids: list[str] = Field(default_factory=list)
     final_score: float | None = None
     risk_reward: float | None = None
+    detected_patterns: list[str] = Field(default_factory=list)
+    pattern_score: float = 0.0
 
 
 class DemoBotCycleResult(BaseModel):
@@ -43,6 +48,7 @@ class DemoBotCycleResult(BaseModel):
     orders_created: int
     decisions: list[DemoBotDecision]
     logs: list[str]
+    risk_summary: DailyRiskSummary
 
 
 class DemoBotService:
@@ -53,6 +59,7 @@ class DemoBotService:
         self.provider = provider
         self.database = database
         self.config = DemoBotConfig.from_settings(settings)
+        self.daily_risk_config = DailyRiskConfig.from_env()
 
     def run_cycle(self, style: TradingStyle, symbols: list[str]) -> DemoBotCycleResult:
         """Scan, filter, guard, create paper orders, and persist decision events."""
@@ -69,9 +76,7 @@ class DemoBotService:
         controls = self.database.load_operator_controls()
         decisions: list[DemoBotDecision] = []
         created_orders: list[ExecutionOrder] = []
-        open_symbols = {order.request.symbol for order in open_orders}
-        daily_count = _trades_today(existing_orders, started)
-
+        rejected_records: list[RejectedSignalRecord] = []
         if controls.maintenance_mode:
             logs.append("Operator maintenance mode is active; every opportunity will be blocked.")
         if controls.degraded_mode:
@@ -80,10 +85,7 @@ class DemoBotService:
         for opportunity in report.opportunities:
             decision = self._decide(
                 opportunity,
-                open_symbols=open_symbols,
-                open_count=len(open_orders) + len(created_orders),
-                daily_count=daily_count,
-                existing_orders=existing_orders,
+                existing_orders=[*existing_orders, *created_orders],
                 maintenance_mode=controls.maintenance_mode,
                 degraded_mode=controls.degraded_mode,
                 now=started,
@@ -92,24 +94,46 @@ class DemoBotService:
                 submission = submit_signal_to_paper(opportunity, settings=self.settings, database=self.database, source="demo_bot")
                 if submission.order:
                     created_orders.append(submission.order)
-                    existing_orders.append(submission.order)
                     decision.order_ids.append(submission.order.order_id)
-                    open_symbols.add(opportunity.symbol)
-                    daily_count += 1
-                    logs.append(f"ACCEPT {opportunity.symbol}: created paper order {', '.join(decision.order_ids)}.")
+                    logs.append(
+                        f"ACCEPT {opportunity.symbol}: created paper order {', '.join(decision.order_ids)} "
+                        f"detected_patterns={','.join(decision.detected_patterns) or '-'} pattern_score={decision.pattern_score:.2f}."
+                    )
                 else:
                     decision.accepted = False
                     decision.reasons.extend(submission.reasons)
                     if not decision.reasons:
                         decision.reasons.append("paper executor did not create an order")
-                    logs.append(f"REJECT {opportunity.symbol}: {'; '.join(decision.reasons)}.")
+                    logs.append(
+                        f"REJECT {opportunity.symbol}: {'; '.join(decision.reasons)} "
+                        f"detected_patterns={','.join(decision.detected_patterns) or '-'} pattern_score={decision.pattern_score:.2f}."
+                    )
             else:
-                logs.append(f"REJECT {opportunity.symbol}: {'; '.join(decision.reasons)}.")
+                logs.append(
+                    f"REJECT {opportunity.symbol}: {'; '.join(decision.reasons)} "
+                    f"detected_patterns={','.join(decision.detected_patterns) or '-'} pattern_score={decision.pattern_score:.2f}."
+                )
             decisions.append(decision)
             events.append(_decision_event(cycle_id, opportunity, decision, started))
+            if not decision.accepted:
+                rejected_records.append(_rejected_signal_record(cycle_id, opportunity, decision, started))
 
         self.database.rebuild_trading_journal()
         completed = datetime.now(timezone.utc)
+        risk_summary = summarize_daily_risk(
+            [*existing_orders, *created_orders],
+            now=completed,
+            config=self.daily_risk_config,
+            risk_per_trade_percent=self._risk_per_trade_percent(),
+        )
+        logs.append(
+            "Risk summary: "
+            f"trades_today={risk_summary.trades_today} "
+            f"open_trades={risk_summary.open_trades} "
+            f"daily_pnl={risk_summary.daily_pnl:.4f} "
+            f"remaining_trade_slots={risk_summary.remaining_trade_slots} "
+            f"bot_risk_status={risk_summary.bot_risk_status}."
+        )
         events.append(
             _event(
                 cycle_id,
@@ -118,9 +142,18 @@ class DemoBotService:
                 "BOT",
                 "completed",
                 f"orders_created={len(created_orders)} decisions={len(decisions)}",
-                payload={"orders_created": len(created_orders), "decisions": len(decisions)},
+                payload={
+                    "orders_created": len(created_orders),
+                    "decisions": len(decisions),
+                    "trades_today": risk_summary.trades_today,
+                    "open_trades": risk_summary.open_trades,
+                    "daily_pnl": risk_summary.daily_pnl,
+                    "remaining_trade_slots": risk_summary.remaining_trade_slots,
+                    "bot_risk_status": risk_summary.bot_risk_status,
+                },
             )
         )
+        self.database.save_rejected_signals(rejected_records)
         self.database.save_trade_events(events)
         return DemoBotCycleResult(
             cycle_id=cycle_id,
@@ -132,15 +165,13 @@ class DemoBotService:
             orders_created=len(created_orders),
             decisions=decisions,
             logs=logs,
+            risk_summary=risk_summary,
         )
 
     def _decide(
         self,
         opportunity: Opportunity,
         *,
-        open_symbols: set[str],
-        open_count: int,
-        daily_count: int,
         existing_orders: list[ExecutionOrder],
         maintenance_mode: bool,
         degraded_mode: bool,
@@ -152,6 +183,8 @@ class DemoBotService:
             reasons.append("operator maintenance mode is active")
         if degraded_mode:
             reasons.append("operator degraded mode is active")
+        if score == 0.0:
+            reasons.extend(_zero_score_reasons(opportunity, self.settings))
         if opportunity.status.value not in EXECUTABLE_DEMO_STATUSES:
             reasons.append(f"status {opportunity.status.value} is not executable by demo bot")
         elif opportunity.status.value not in self.config.allowed_statuses:
@@ -174,15 +207,14 @@ class DemoBotService:
         reasons.extend(_market_context_reasons(opportunity))
         if opportunity.direction not in {DirectionBias.LONG, DirectionBias.SHORT}:
             reasons.append("direction is not executable")
-        if opportunity.symbol in open_symbols:
-            reasons.append(f"open paper position already exists for {opportunity.symbol}")
-        if open_count >= self.config.max_open_trades:
-            reasons.append(f"max open trades {self.config.max_open_trades} reached")
-        if daily_count >= self.config.max_trades_per_day:
-            reasons.append(f"daily trade cap {self.config.max_trades_per_day} reached")
-        cooldown = _cooldown_reason(opportunity.symbol, existing_orders, now, self.config.cooldown_minutes)
-        if cooldown:
-            reasons.append(cooldown)
+        risk_decision = evaluate_daily_limits(
+            existing_orders,
+            symbol=opportunity.symbol,
+            now=now,
+            config=self.daily_risk_config,
+            risk_per_trade_percent=self._risk_per_trade_percent(),
+        )
+        reasons.extend(risk_decision.reasons)
         return DemoBotDecision(
             symbol=opportunity.symbol,
             status=opportunity.status.value,
@@ -191,7 +223,17 @@ class DemoBotService:
             reasons=reasons,
             final_score=score,
             risk_reward=opportunity.risk_reward,
+            detected_patterns=opportunity.detected_patterns,
+            pattern_score=opportunity.pattern_score,
         )
+
+    def _risk_per_trade_percent(self) -> float:
+        from os import getenv
+
+        raw = getenv("RISK_PER_TRADE_PERCENT")
+        if raw is None or not raw.strip():
+            return 0.25
+        return float(raw)
 
 
 def _level_reasons(opportunity: Opportunity) -> list[str]:
@@ -240,6 +282,27 @@ def _level_reasons(opportunity: Opportunity) -> list[str]:
     return reasons
 
 
+def _zero_score_reasons(opportunity: Opportunity, settings: AppSettings) -> list[str]:
+    """Return explicit machine-readable reasons for diagnostic score=0 rows."""
+
+    reasons: list[str] = []
+    if opportunity.setup_subtype.value == "none" or opportunity.raw_setup_family is None or opportunity.setup_family.value == "no_trade":
+        reasons.append("no_setup_detected")
+    if opportunity.direction not in {DirectionBias.LONG, DirectionBias.SHORT}:
+        reasons.append("missing_direction")
+    if opportunity.entry is None:
+        reasons.append("missing_entry")
+    if opportunity.stop_loss is None:
+        reasons.append("missing_stop_loss")
+    if opportunity.take_profit is None:
+        reasons.append("missing_take_profit")
+    if opportunity.risk_reward is None or opportunity.risk_reward <= 0.0:
+        reasons.append("invalid_risk_reward")
+    if _data_quality_score(opportunity) < settings.portfolio_risk.min_data_quality_for_entry:
+        reasons.append("data_quality_failed")
+    return reasons
+
+
 def _spread_friction_reason(opportunity: Opportunity, settings: AppSettings) -> str | None:
     if opportunity.spread is None:
         return None
@@ -274,28 +337,6 @@ def _data_quality_score(opportunity: Opportunity) -> float:
     return opportunity.data_quality.score
 
 
-def _trades_today(orders: list[ExecutionOrder], now: datetime) -> int:
-    today = now.astimezone(timezone.utc).date()
-    return sum(1 for order in orders if order.created_at.astimezone(timezone.utc).date() == today)
-
-
-def _cooldown_reason(symbol: str, orders: list[ExecutionOrder], now: datetime, cooldown_minutes: float) -> str | None:
-    if cooldown_minutes <= 0.0:
-        return None
-    cutoff = now - timedelta(minutes=cooldown_minutes)
-    matching_times = [
-        timestamp
-        for order in orders
-        if order.request.symbol == symbol
-        for timestamp in [order.created_at, order.closed_at]
-        if timestamp is not None
-    ]
-    latest = max(matching_times, default=None)
-    if latest is not None and latest >= cutoff:
-        return f"cooldown active for {symbol}"
-    return None
-
-
 def _decision_event(cycle_id: str, opportunity: Opportunity, decision: DemoBotDecision, timestamp: datetime) -> TradeEvent:
     event_type = TradeEventType.DEMO_BOT_DECISION_ACCEPTED if decision.accepted else TradeEventType.DEMO_BOT_DECISION_REJECTED
     trade_id = decision.order_ids[0] if decision.order_ids else cycle_id
@@ -312,8 +353,45 @@ def _decision_event(cycle_id: str, opportunity: Opportunity, decision: DemoBotDe
             "risk_reward": decision.risk_reward,
             "setup_subtype": decision.setup_subtype,
             "order_ids": ",".join(decision.order_ids),
+            "detected_patterns": ",".join(decision.detected_patterns),
+            "pattern_score": decision.pattern_score,
         },
     )
+
+
+def _rejected_signal_record(
+    cycle_id: str,
+    opportunity: Opportunity,
+    decision: DemoBotDecision,
+    timestamp: datetime,
+) -> RejectedSignalRecord:
+    return RejectedSignalRecord(
+        id=str(uuid.uuid4()),
+        cycle_id=cycle_id,
+        timestamp=timestamp,
+        symbol=opportunity.symbol,
+        setup=opportunity.setup_subtype.value,
+        status=opportunity.status.value,
+        score=decision.final_score,
+        risk_reward=decision.risk_reward,
+        market_regime=opportunity.regime.value if opportunity.regime else None,
+        spread_atr=_spread_atr(opportunity),
+        rejection_reasons=list(decision.reasons),
+        entry=opportunity.entry,
+        stop_loss=opportunity.stop_loss,
+        tp1=opportunity.tp1,
+        tp2=opportunity.tp2,
+        tp3=opportunity.tp3,
+        provider=opportunity.provider,
+        broker=os.getenv("BROKER_MODE", "paper").strip().lower() or "paper",
+        style=opportunity.style.value,
+    )
+
+
+def _spread_atr(opportunity: Opportunity) -> float | None:
+    if opportunity.spread is None or opportunity.atr is None or opportunity.atr <= 0.0:
+        return None
+    return opportunity.spread / opportunity.atr
 
 
 def _event(

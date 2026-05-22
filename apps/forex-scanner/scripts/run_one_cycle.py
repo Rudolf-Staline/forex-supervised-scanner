@@ -24,7 +24,7 @@ def main() -> None:
         debug_market_data=args.debug_market_data,
     )
     style = TradingStyle(args.style)
-    symbols = normalize_symbols(args.symbols)
+    symbols = normalize_symbols(args.symbols, args.watchlist)
     print(f"runtime provider={provider.name} broker={args.broker} mode=paper")
     result = DemoBotService(settings, provider, database).run_cycle(style, symbols)
     print_cycle_result(result)

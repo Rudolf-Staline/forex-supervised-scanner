@@ -15,6 +15,7 @@ from app.config.safety import DemoSafetyError, ensure_demo_safe_mode
 from app.config.env import load_dotenv
 from app.config.safety import ensure_mt5_demo_safe_mode
 from app.config.settings import AppSettings, load_settings
+from app.config.watchlists import get_watchlist, watchlist_names
 from app.core.types import TradingStyle
 from app.data.providers import DEBUG_MARKET_DATA_ENV, MarketDataProvider, build_provider
 from app.execution.demo_bot import DemoBotCycleResult
@@ -43,8 +44,14 @@ def add_cycle_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--symbols",
         nargs="+",
-        default=DEFAULT_DEMO_SYMBOLS,
-        help="Symbols to scan. Default: EUR/USD GBP/USD USD/CHF.",
+        default=None,
+        help="Symbols to scan. Overrides --watchlist. Default: EUR/USD GBP/USD USD/CHF.",
+    )
+    parser.add_argument(
+        "--watchlist",
+        default=None,
+        choices=watchlist_names(),
+        help="Named watchlist profile to scan, for example major_forex.",
     )
     parser.add_argument(
         "--debug-market-data",
@@ -82,13 +89,21 @@ def load_demo_runtime(
     return settings, database, provider
 
 
-def normalize_symbols(symbols: list[str]) -> list[str]:
-    """Accept whitespace-separated or comma-separated symbols."""
+def normalize_symbols(symbols: list[str] | None, watchlist: str | None = None) -> list[str]:
+    """Accept explicit symbols first, then a named watchlist, then defaults."""
 
     normalized: list[str] = []
-    for raw in symbols:
-        normalized.extend(symbol.strip().upper() for symbol in raw.split(",") if symbol.strip())
+    for raw in symbols or []:
+        normalized.extend(_normalize_symbol(symbol) for symbol in raw.split(",") if symbol.strip())
+    if normalized:
+        return normalized
+    if watchlist:
+        return [_normalize_symbol(symbol) for symbol in get_watchlist(watchlist)]
     return normalized or list(DEFAULT_DEMO_SYMBOLS)
+
+
+def _normalize_symbol(symbol: str) -> str:
+    return symbol.strip().upper()
 
 
 def created_order_ids(result: DemoBotCycleResult) -> list[str]:
@@ -117,10 +132,12 @@ def print_cycle_result(result: DemoBotCycleResult) -> None:
         rr = "n/a" if decision.risk_reward is None else f"{decision.risk_reward:.2f}"
         order_ids = ",".join(decision.order_ids) if decision.order_ids else "-"
         reasons = "; ".join(decision.reasons) if decision.reasons else "paper trade accepted"
+        patterns = ",".join(decision.detected_patterns) if decision.detected_patterns else "-"
         print(
             "decision "
             f"{verdict} symbol={decision.symbol} status={decision.status} setup={decision.setup_subtype} "
-            f"score={score} rr={rr} order_ids={order_ids} reasons={reasons}"
+            f"score={score} rr={rr} pattern_score={decision.pattern_score:.2f} "
+            f"detected_patterns={patterns} order_ids={order_ids} reasons={reasons}"
         )
     if result.logs:
         print("logs:")

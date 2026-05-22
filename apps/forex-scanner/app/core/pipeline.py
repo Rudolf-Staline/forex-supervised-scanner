@@ -28,7 +28,7 @@ from app.core.types import (
     TradingStyle,
     SessionName,
 )
-from app.data.providers import MarketDataProvider
+from app.data.providers import DataProviderError, MarketDataProvider, debug_market_data_enabled
 from app.data.validation import DataValidationError, window_for_bars
 from app.indicators.calculations import add_indicators
 from app.indicators.levels import find_key_levels
@@ -66,6 +66,15 @@ class ScannerService:
         for symbol in symbols:
             try:
                 opportunities.extend(self._analyze_symbol(symbol, style, timestamp))
+            except (DataProviderError, DataValidationError) as exc:
+                if debug_market_data_enabled():
+                    LOGGER.exception("symbol analysis failed", extra={"symbol": symbol, "style": style.value})
+                else:
+                    LOGGER.warning(
+                        "symbol analysis failed",
+                        extra={"symbol": symbol, "style": style.value, "error": str(exc)},
+                    )
+                errors.append(SymbolAnalysisError(symbol=symbol, reason=str(exc)))
             except Exception as exc:
                 LOGGER.exception("symbol analysis failed", extra={"symbol": symbol, "style": style.value})
                 errors.append(SymbolAnalysisError(symbol=symbol, reason=str(exc)))
@@ -233,6 +242,9 @@ class ScannerService:
                         entry_regime=entry_regime.regime,
                         trigger_regime=trigger_regime.regime,
                         data_quality=data_quality,
+                        detected_patterns=raw.detected_patterns,
+                        pattern_score=raw.pattern_score,
+                        pattern_explanations=raw.pattern_explanations,
                     )
                 )
                 continue
@@ -283,6 +295,9 @@ class ScannerService:
                     entry_regime=entry_regime.regime,
                     trigger_regime=trigger_regime.regime,
                     data_quality=data_quality,
+                    detected_patterns=raw.detected_patterns,
+                    pattern_score=raw.pattern_score,
+                    pattern_explanations=raw.pattern_explanations,
                 )
             )
 
@@ -569,6 +584,9 @@ def _opportunity_from_candidate(
     entry_regime: MarketRegime,
     trigger_regime: MarketRegime,
     data_quality: DataQualityDiagnostic | None,
+    detected_patterns: list[str] | None = None,
+    pattern_score: float = 0.0,
+    pattern_explanations: list[str] | None = None,
     failed_gates: list[str] | None = None,
 ) -> Opportunity:
     gates = gate_breakdown
@@ -621,6 +639,9 @@ def _opportunity_from_candidate(
         spread=spread,
         atr=atr,
         key_level_distances=key_level_distances,
+        detected_patterns=detected_patterns or [],
+        pattern_score=pattern_score,
+        pattern_explanations=pattern_explanations or [],
         session=session,
         htf_regime=htf_regime,
         entry_regime=entry_regime,

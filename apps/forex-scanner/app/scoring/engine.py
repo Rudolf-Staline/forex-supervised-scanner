@@ -96,6 +96,7 @@ class ScoringEngine:
             "volatility_exploitability": setup.volatility_suitability,
             "empirical_score": empirical,
             "empirical_adjustment": empirical - neutral_empirical,
+            "pattern_score": setup.pattern_score,
         }
 
         component_weights = self.settings.weights.as_dict()
@@ -119,7 +120,8 @@ class ScoringEngine:
         ]
         execution_score = round(_average(components[key] for key in execution_keys), 2)
         context_score = round(_context_score(components, data_quality, self.settings.context), 2)
-        final_score = round(_layer_blend(technical_score, execution_score, context_score, empirical, self.settings.layer_weights.as_dict()), 2)
+        base_final = _layer_blend(technical_score, execution_score, context_score, empirical, self.settings.layer_weights.as_dict())
+        final_score = round(_clip(base_final + min(15.0, setup.pattern_score) * 0.2), 2)
         return ScoreResult(
             technical_score=technical_score,
             execution_score=execution_score,

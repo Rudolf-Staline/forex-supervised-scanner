@@ -77,6 +77,13 @@ def test_watchlist_not_executed(settings, database, monkeypatch: pytest.MonkeyPa
     assert "status watchlist is not executable by demo bot" in result.decisions[0].reasons
     events = database.load_trade_events()
     assert any(event.event_type == TradeEventType.DEMO_BOT_DECISION_REJECTED for event in events)
+    rejected = database.load_rejected_signals()
+    assert len(rejected) == 1
+    assert rejected[0].cycle_id == result.cycle_id
+    assert rejected[0].symbol == "EUR/USD"
+    assert rejected[0].status == "watchlist"
+    assert rejected[0].score == 92.0
+    assert "status watchlist is not executable by demo bot" in rejected[0].rejection_reasons
 
 
 def test_approved_signal_can_execute(settings, database, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -91,6 +98,7 @@ def test_approved_signal_can_execute(settings, database, monkeypatch: pytest.Mon
     events = database.load_trade_events()
     assert any(event.event_type == TradeEventType.DEMO_BOT_DECISION_ACCEPTED for event in events)
     assert any("created paper order" in line for line in result.logs)
+    assert database.load_rejected_signals() == []
 
 
 def test_duplicate_symbol_blocked(settings, database, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,6 +150,40 @@ def test_detected_signal_not_executed(settings, database, monkeypatch: pytest.Mo
     assert result.orders_created == 0
     assert not result.decisions[0].accepted
     assert "status detected is not executable by demo bot" in result.decisions[0].reasons
+
+
+def test_zero_score_rejection_reasons_are_explicit(settings, database, monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeScannerService.opportunities = [
+        _opportunity(
+            status=OpportunityStatus.REJECTED,
+            score=0.0,
+            final_score=0.0,
+            setup_family=SetupFamily.NO_TRADE,
+            raw_setup_family=None,
+            setup_subtype=SetupSubtype.NONE,
+            direction=DirectionBias.NO_TRADE,
+            entry=None,
+            stop_loss=None,
+            take_profit=None,
+            risk_reward=None,
+            data_quality=DataQualityDiagnostic(score=20.0, missing_bars=40, stale_minutes=120.0, spread_available=False, resampled=True),
+        )
+    ]
+    monkeypatch.setattr(demo_bot_module, "ScannerService", FakeScannerService)
+
+    result = DemoBotService(settings, object(), database).run_cycle(TradingStyle.DAY_TRADING, ["EUR/USD"])
+
+    reasons = result.decisions[0].reasons
+    assert result.orders_created == 0
+    assert "no_setup_detected" in reasons
+    assert "missing_direction" in reasons
+    assert "missing_entry" in reasons
+    assert "missing_stop_loss" in reasons
+    assert "missing_take_profit" in reasons
+    assert "invalid_risk_reward" in reasons
+    assert "data_quality_failed" in reasons
+    rejected = database.load_rejected_signals()[0]
+    assert "no_setup_detected" in rejected.rejection_reasons
 
 
 def test_bad_levels_spread_and_session_are_blocked(settings, database, monkeypatch: pytest.MonkeyPatch) -> None:

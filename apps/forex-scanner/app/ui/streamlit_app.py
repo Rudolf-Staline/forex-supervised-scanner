@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import os
+from collections import Counter
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Literal
@@ -16,7 +18,7 @@ from app.backtest.metrics import calculate_metrics
 from app.config.safety import DemoSafetyError, demo_safety_status, ensure_demo_safe_mode
 from app.config.settings import AppSettings, LOCAL_SETTINGS_PATH, load_settings, save_settings
 from app.core.pipeline import ScannerService
-from app.core.types import BacktestResult, DirectionBias, Opportunity, OpportunityStatus, SetupFamily, TradeRecord, TradingStyle
+from app.core.types import BacktestResult, DirectionBias, Opportunity, OpportunityStatus, SetupFamily, Timeframe, TradeRecord, TradingStyle
 from app.data.providers import MarketDataProvider, build_provider
 from app.data.validation import window_for_bars
 from app.execution.demo_bot import DemoBotCycleResult, DemoBotService, demo_bot_control_event
@@ -47,6 +49,13 @@ def main() -> None:
     st.caption("Scanner local, opportunites classees, paper trading, bot demo, journal, backtest et audit pour une demo Forex supervisee.")
     _provider_notice(settings)
     _system_status_panel(settings, database, provider)
+    monitor_tabs = st.tabs(["Bot Monitor", "Rejected Signals", "MT5 Data Status"])
+    with monitor_tabs[0]:
+        _bot_monitor_page(settings, provider, database)
+    with monitor_tabs[1]:
+        _rejected_signals_page(database)
+    with monitor_tabs[2]:
+        _mt5_data_status_page(settings)
 
     tabs = st.tabs(["Scanner", "Opportunités", "Paper Trading", "Bot Demo", "Backtest", "Journal", "Rapports / Audit"])
     with tabs[0]:
@@ -500,6 +509,198 @@ def _demo_bot_created_order_ids(events: list[TradeEvent]) -> set[str]:
         if isinstance(raw_order_ids, str):
             order_ids.update(order_id.strip() for order_id in raw_order_ids.split(",") if order_id.strip())
     return order_ids
+
+
+def _bot_monitor_page(settings: AppSettings, provider: MarketDataProvider, database: Database) -> None:
+    st.subheader("Bot Monitor")
+    st.caption("Vue de supervision uniquement. Le bot ne demarre pas automatiquement depuis ce monitoring.")
+    state = _demo_bot_state()
+    last_result = st.session_state.get("last_demo_bot_cycle")
+    broker_orders = database.load_broker_orders()
+    paper_orders = database.load_paper_orders()
+    open_orders = [order for order in paper_orders if order.is_open]
+    closed_today = _orders_today([order for order in paper_orders if not order.is_open], datetime.now(timezone.utc))
+    last_broker_order = max(broker_orders, key=lambda order: order.created_at, default=None)
+    accepted = rejected = opportunities = 0
+    last_cycle_duration = "n/a"
+    risk_status = "ok"
+    if isinstance(last_result, DemoBotCycleResult):
+        opportunities = last_result.opportunities
+        accepted = sum(1 for decision in last_result.decisions if decision.accepted)
+        rejected = sum(1 for decision in last_result.decisions if not decision.accepted)
+        last_cycle_duration = f"{(last_result.completed_at - last_result.started_at).total_seconds():.2f}s"
+        risk_status = last_result.risk_summary.bot_risk_status
+
+    cols = st.columns(4)
+    cols[0].metric("MT5 connection", _mt5_connection_status(settings, last_broker_order))
+    cols[1].metric("Broker mode", os.getenv("BROKER_MODE", "paper"))
+    cols[2].metric("Provider mode", provider.name)
+    cols[3].metric("Bot status", state.status)
+    cols = st.columns(4)
+    cols[0].metric("Last cycle time", state.last_cycle_at.astimezone().strftime("%Y-%m-%d %H:%M:%S") if state.last_cycle_at else "n/a")
+    cols[1].metric("Last duration", last_cycle_duration)
+    cols[2].metric("Opportunities", opportunities)
+    cols[3].metric("Risk status", risk_status)
+    cols = st.columns(4)
+    cols[0].metric("Accepted signals", accepted)
+    cols[1].metric("Rejected signals", rejected)
+    cols[2].metric("Open demo positions", len(open_orders))
+    cols[3].metric("Daily PnL demo", f"{sum(order.realized_pnl or 0.0 for order in closed_today):.2f}")
+
+    st.markdown("**Rejection reasons**")
+    rejected_records = database.load_rejected_signals()
+    _counter_dataframe(_rejection_reason_counter(rejected_records), empty_message="Aucun rejet enregistre.")
+
+    st.markdown("**Last broker response**")
+    if last_broker_order is None:
+        st.info("Aucune reponse broker demo enregistree.")
+    else:
+        st.json(
+            {
+                "order_id": last_broker_order.order_id,
+                "broker_order_id": last_broker_order.broker_order_id,
+                "broker_mode": last_broker_order.broker_mode,
+                "status": last_broker_order.status.value,
+                "broker_state": last_broker_order.broker_state.value if last_broker_order.broker_state else None,
+                "retcode": last_broker_order.broker_acknowledgement.get("retcode"),
+                "comment": last_broker_order.broker_acknowledgement.get("comment"),
+                "filling_mode_used": last_broker_order.broker_acknowledgement.get("filling_mode"),
+            }
+        )
+
+
+def _rejected_signals_page(database: Database) -> None:
+    st.subheader("Rejected Signals")
+    st.caption("Journal d'analyse uniquement: ces lignes ne deviennent jamais des trades.")
+    records = database.load_rejected_signals()
+    if not records:
+        st.info("Aucun signal rejete enregistre. Lancez un cycle du bot pour alimenter ce journal.")
+        return
+    symbols = sorted({record.symbol for record in records})
+    setups = sorted({record.setup for record in records})
+    reasons = sorted({reason for record in records for reason in record.rejection_reasons})
+    filter_cols = st.columns(3)
+    selected_symbols = filter_cols[0].multiselect("Symboles", symbols, default=symbols, key="rejected_symbols")
+    selected_setups = filter_cols[1].multiselect("Setups", setups, default=setups, key="rejected_setups")
+    selected_reasons = filter_cols[2].multiselect("Raisons", reasons, default=[], key="rejected_reasons")
+    filtered = [
+        record
+        for record in records
+        if record.symbol in selected_symbols
+        and record.setup in selected_setups
+        and (not selected_reasons or any(reason in record.rejection_reasons for reason in selected_reasons))
+    ]
+    scores = [record.score for record in filtered if record.score is not None]
+    metric_cols = st.columns(3)
+    metric_cols[0].metric("Rejected signals", len(filtered))
+    metric_cols[1].metric("Score moyen", "n/a" if not scores else f"{sum(scores) / len(scores):.2f}")
+    metric_cols[2].metric("Raisons uniques", len(_rejection_reason_counter(filtered)))
+    st.markdown("**Raisons les plus frequentes**")
+    _counter_dataframe(_rejection_reason_counter(filtered), empty_message="Aucune raison pour ce filtre.")
+    st.markdown("**Tableau des rejets**")
+    st.dataframe(_rejected_signals_frame(filtered), hide_index=True, width="stretch")
+
+
+def _mt5_data_status_page(settings: AppSettings) -> None:
+    st.subheader("MT5 Data Status")
+    st.caption("Diagnostic donnees uniquement. Aucun ordre n'est envoye.")
+    provider_mode = st.selectbox("Provider a tester", ["mt5", "synthetic", "auto"], index=0, key="mt5_data_provider")
+    symbols = st.multiselect("Symboles testes", settings.symbols, default=[symbol for symbol in ["EUR/USD", "GBP/USD", "USD/CHF"] if symbol in settings.symbols], key="mt5_data_symbols")
+    timeframe = Timeframe(st.selectbox("Timeframe", [tf.value for tf in Timeframe], index=[tf.value for tf in Timeframe].index(Timeframe.M15.value), key="mt5_data_timeframe"))
+    rows = st.number_input("Bougies demandees", min_value=120, max_value=1000, value=200, step=50, key="mt5_data_rows")
+    if st.button("Tester les donnees", disabled=not symbols, key="mt5_data_test"):
+        adjusted = settings.model_copy(deep=True)
+        adjusted.provider.name = provider_mode
+        adjusted.provider.max_bars = int(rows)
+        provider = build_provider(adjusted)
+        window = window_for_bars(timeframe, int(rows))
+        results = []
+        for symbol in symbols:
+            try:
+                frame = provider.get_ohlcv(symbol, timeframe, window.start, window.end)
+                last = frame.iloc[-1] if not frame.empty else None
+                results.append(
+                    {
+                        "symbol": symbol,
+                        "timeframe": timeframe.value,
+                        "bars": len(frame),
+                        "last_candle": frame.index[-1].isoformat() if not frame.empty else "",
+                        "spread_current": None if last is None or "spread" not in frame.columns else float(last.get("spread", 0.0)),
+                        "provider_status": "OK",
+                        "error": "",
+                    }
+                )
+            except Exception as exc:
+                results.append(
+                    {
+                        "symbol": symbol,
+                        "timeframe": timeframe.value,
+                        "bars": 0,
+                        "last_candle": "",
+                        "spread_current": None,
+                        "provider_status": "error",
+                        "error": str(exc),
+                    }
+                )
+        st.dataframe(pd.DataFrame(results), hide_index=True, width="stretch")
+    else:
+        st.info("Cliquez sur Tester les donnees pour interroger le provider selectionne.")
+
+
+def _orders_today(orders: list[ExecutionOrder], now: datetime) -> list[ExecutionOrder]:
+    today = now.astimezone(timezone.utc).date()
+    return [order for order in orders if order.created_at.astimezone(timezone.utc).date() == today]
+
+
+def _mt5_connection_status(settings: AppSettings, last_broker_order: ExecutionOrder | None) -> str:
+    if os.getenv("BROKER_MODE", "paper").strip().lower() != "mt5_demo" and settings.provider.name != "mt5":
+        return "not configured"
+    try:
+        import MetaTrader5  # noqa: F401
+    except ImportError:
+        return "package missing"
+    if last_broker_order is not None and last_broker_order.broker_mode == "mt5_demo":
+        return "last broker OK" if last_broker_order.broker_acknowledgement else "configured"
+    return "configured"
+
+
+def _rejected_signals_frame(records: list[object]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "time": record.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S"),
+                "cycle_id": record.cycle_id,
+                "symbol": record.symbol,
+                "setup": record.setup,
+                "status": record.status,
+                "score": record.score,
+                "rr": record.risk_reward,
+                "market_regime": record.market_regime,
+                "spread_atr": record.spread_atr,
+                "reasons": "; ".join(record.rejection_reasons),
+                "entry": record.entry,
+                "stop_loss": record.stop_loss,
+                "tp1": record.tp1,
+                "tp2": record.tp2,
+                "tp3": record.tp3,
+                "provider": record.provider,
+                "broker": record.broker,
+                "style": record.style,
+            }
+            for record in records
+        ]
+    )
+
+
+def _rejection_reason_counter(records: list[object]) -> Counter[str]:
+    return Counter(reason for record in records for reason in record.rejection_reasons)
+
+
+def _counter_dataframe(counter: Counter[str], *, empty_message: str) -> None:
+    if not counter:
+        st.info(empty_message)
+        return
+    st.dataframe(pd.DataFrame([{"item": key, "count": count} for key, count in counter.most_common(20)]), hide_index=True, width="stretch")
 
 
 def _journal_page(database: Database) -> None:
