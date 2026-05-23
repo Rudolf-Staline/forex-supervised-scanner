@@ -1,5 +1,7 @@
 # Forex Supervisor (paper/demo only)
 
+[![CI](https://github.com/forex-supervised-scanner/forex-supervised-scanner/actions/workflows/tests.yml/badge.svg)](https://github.com/forex-supervised-scanner/forex-supervised-scanner/actions/workflows/tests.yml)
+
 Scanner/bot Python orienté sécurité pour Forex, commodities et indices, avec provider `mt5`, broker `paper` et `mt5_demo`, watchlist `multi_asset_demo`, résolution de symboles MT5 et scan aware des sessions.
 
 ## ⚠️ Avertissement sécurité
