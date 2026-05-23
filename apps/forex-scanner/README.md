@@ -8,6 +8,7 @@ Scanner/bot Python orienté sécurité pour Forex, commodities et indices, avec 
 
 - **Aucun live trading autorisé** dans ce projet.
 - Garder `EXECUTION_MODE=paper` et `ALLOW_LIVE_TRADING=false`.
+- Le mode live trading doit rester interdit : ne jamais activer `ALLOW_LIVE_TRADING=true` ni sélectionner un broker live.
 - Ne jamais commiter de secrets broker/MT5.
 
 ## Setup local Windows (validation MT5 réelle)
