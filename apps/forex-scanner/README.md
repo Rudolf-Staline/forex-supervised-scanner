@@ -1,5 +1,7 @@
 # Forex Supervisor
 
+[![CI](https://github.com/forex-supervised-scanner/forex-supervised-scanner/actions/workflows/tests.yml/badge.svg)](https://github.com/forex-supervised-scanner/forex-supervised-scanner/actions/workflows/tests.yml)
+
 Forex Supervisor est une application locale d'aide à l'analyse Forex. Elle regroupe un scanner multi-timeframe, un scoring de setups, du paper trading, un bot demo, un journal, un backtest simplifié et des rapports d'audit locaux.
 
 Le projet se lance depuis `apps/forex-scanner` et doit rester en mode `paper/demo`.
