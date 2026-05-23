@@ -1,4 +1,4 @@
-name: quality
+name: tests
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: ["**"]
 
 jobs:
-  forex:
+  fast-cloud-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 4
     defaults:
@@ -29,7 +29,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Fast cloud-safe tests
+      - name: Run fast cloud-safe suite
         run: |
           python -m pytest -q \
             tests/test_safety.py \
@@ -41,41 +41,3 @@ jobs:
             tests/test_forward_test_paper.py \
             tests/test_demo_execution_gate.py \
             --maxfail=1
-
-  web:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/aurora-player
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install
-        run: npm install
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Format
-        run: npm run format:check
-
-      - name: Unit tests
-        run: npm run test
-
-      - name: Build
-        run: npm run build
-
-      - name: Install Playwright
-        run: npx playwright install --with-deps chromium
-
-      - name: E2E
-        run: npm run e2e

@@ -35,3 +35,7 @@ include = ["app*"]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q -p no:cacheprovider"
+markers = [
+  "integration: long-running or non-cloud tests",
+  "mt5: requires a local MetaTrader5 terminal",
+]
