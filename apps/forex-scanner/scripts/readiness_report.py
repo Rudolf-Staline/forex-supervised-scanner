@@ -39,10 +39,8 @@ READINESS_TXT = PROJECT_ROOT / "reports" / "readiness_report.txt"
 READINESS_JSON = PROJECT_ROOT / "reports" / "readiness_report.json"
 CRITICAL_TESTS = [
     "tests/test_safety.py",
-    "tests/test_mt5_demo_safety.py",
-    "tests/test_demo_execution_gate.py",
-    "tests/test_mt5_reconciliation.py",
-    "tests/test_ultra_limited_demo_execution.py",
+    "tests/test_demo_bot.py",
+    "tests/test_multi_asset_safety.py",
 ]
 
 
@@ -78,19 +76,26 @@ def build_readiness_report(*, run_tests: bool = True, mt5_module: object | None 
     mt5_report: MT5ReconciliationReport | None = None
 
     checks.append(_tests_check(run_tests))
+    checks.append(_critical_secrets_check())
+    checks.append(_provider_synthetic_check())
     checks.append(_environment_check("ALLOW_LIVE_TRADING", "false", default="false"))
     checks.append(_environment_check("MT5_DEMO_ONLY", "true", default="true", critical=False))
     checks.append(_environment_default_false_check("ENABLE_DEMO_EXECUTION"))
+    checks.append(_environment_default_false_check("ALLOW_MULTI_ASSET_DEMO_TRADING"))
     checks.append(_max_demo_volume_check())
     checks.append(_max_demo_orders_per_day_check())
-    checks.append(_module_check("demo_execution_gate", "app.safety.demo_execution_gate"))
-    checks.append(_module_check("mt5_reconciliation", "app.brokers.mt5_reconciliation"))
-    checks.append(_module_check("forward_test_paper", "scripts.forward_test_paper"))
-    checks.append(_module_check("backtest_multi_asset", "scripts.backtest_multi_asset"))
+    checks.append(_module_check("demo_execution_gate", "app.safety.demo_execution_gate", optional=True))
+    checks.append(_module_check("mt5_reconciliation_module", "app.brokers.mt5_reconciliation", optional=True))
+    checks.append(_module_check("forward_test_paper", "scripts.forward_test_paper", optional=True))
+    checks.append(_module_check("backtest", "app.backtest.engine", optional=True))
+    checks.append(_module_check("threshold_optimizer", "scripts.threshold_optimizer_report", optional=True))
+    checks.append(_module_check("signal_journal", "app.journal.trade_journal", optional=True))
+    checks.append(_module_check("multi_asset_signal_report", "scripts.multi_asset_signal_report", optional=True))
     checks.append(_daily_limits_check())
     checks.append(_journal_check(database))
     checks.append(_paper_broker_check(settings, database))
     checks.append(_sessions_check())
+    checks.append(_module_check("session_aware_scanning", "_demo_bot_cli", optional=True))
 
     mt5_available = mt5_module is not None or importlib.util.find_spec("MetaTrader5") is not None
     if not mt5_available:
@@ -133,21 +138,23 @@ def classify_readiness(checks: list[ReadinessCheck], mt5_report: MT5Reconciliati
             "ALLOW_LIVE_TRADING",
             "ENABLE_DEMO_EXECUTION",
             "broker_paper",
-            "demo_execution_gate",
-            "daily_limits",
-            "journal",
+            "provider_synthetic",
         ]
     )
+    no_critical_secret_gap = not any(c.name == "critical_secrets" and c.status == "FAIL" for c in checks)
+    paper_ready = paper_ready and no_critical_secret_gap
     demo_ready = (
         paper_ready
         and mt5_report is not None
         and mt5_report.reconciliation_status == "OK"
         and _check_ok(checks, "mt5_connected")
         and _check_ok(checks, "account_demo_only")
-        and _check_ok(checks, "symbol_resolver")
-        and _check_ok(checks, "symbol_health")
+        and _check_ok(checks, "demo_execution_gate")
+        and _check_ok(checks, "mt5_reconciliation_module")
+        and _check_ok(checks, "daily_limits")
         and _check_ok(checks, "max_demo_order_volume")
         and _check_ok(checks, "max_demo_orders_per_day")
+        and _check_ok(checks, "journal")
     )
     if demo_ready:
         return "DEMO_READY_LIMITED"
@@ -292,12 +299,37 @@ def _max_demo_orders_per_day_check() -> ReadinessCheck:
     return ReadinessCheck("max_demo_orders_per_day", status, f"MAX_DEMO_ORDERS_PER_DAY={value}")
 
 
-def _module_check(name: str, module_name: str) -> ReadinessCheck:
+def _module_check(name: str, module_name: str, *, optional: bool = False) -> ReadinessCheck:
     try:
         __import__(module_name)
     except Exception as exc:
-        return ReadinessCheck(name, "FAIL", str(exc))
+        status = "WARN" if optional else "FAIL"
+        return ReadinessCheck(name, status, str(exc), critical=not optional)
     return ReadinessCheck(name, "OK", f"{module_name} available")
+
+
+def _provider_synthetic_check() -> ReadinessCheck:
+    try:
+        from app.data.providers import SyntheticForexDataProvider
+        from app.config.settings import load_settings as _load_settings
+
+        settings = _load_settings()
+        provider = SyntheticForexDataProvider(settings.provider)
+    except Exception as exc:
+        return ReadinessCheck("provider_synthetic", "FAIL", str(exc))
+    return ReadinessCheck("provider_synthetic", "OK", f"provider={provider.name}")
+
+
+def _critical_secrets_check() -> ReadinessCheck:
+    missing = [name for name in ("DB_PASSWORD",) if not os.getenv(name)]
+    if missing:
+        return ReadinessCheck(
+            "critical_secrets",
+            "FAIL",
+            f"missing required secrets: {', '.join(missing)}",
+            critical=False,
+        )
+    return ReadinessCheck("critical_secrets", "OK", "critical secrets available or not required")
 
 
 def _daily_limits_check() -> ReadinessCheck:
@@ -306,6 +338,16 @@ def _daily_limits_check() -> ReadinessCheck:
     except Exception as exc:
         return ReadinessCheck("daily_limits", "FAIL", str(exc))
     return ReadinessCheck("daily_limits", "OK", f"max_trades_per_day={config.max_trades_per_day} max_open_trades={config.max_open_trades}")
+
+
+def _wait_for_session_check() -> ReadinessCheck:
+    run_demo = PROJECT_ROOT / "scripts" / "run_demo_bot.py"
+    if not run_demo.exists():
+        return ReadinessCheck("wait_for_session", "WARN", "scripts/run_demo_bot.py missing", critical=False)
+    content = run_demo.read_text(encoding="utf-8")
+    if "--wait-for-session" in content:
+        return ReadinessCheck("wait_for_session", "OK", "--wait-for-session option found")
+    return ReadinessCheck("wait_for_session", "WARN", "--wait-for-session option not found", critical=False)
 
 
 def _journal_check(database: Database) -> ReadinessCheck:

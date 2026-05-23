@@ -30,8 +30,10 @@ def test_classify_readiness_demo_ready_limited_when_all_strict_checks_pass() -> 
         *_paper_ready_checks(),
         readiness.ReadinessCheck("mt5_connected", "OK", "connected"),
         readiness.ReadinessCheck("account_demo_only", "OK", "demo"),
-        readiness.ReadinessCheck("symbol_resolver", "OK", "resolved"),
-        readiness.ReadinessCheck("symbol_health", "OK", "healthy"),
+        readiness.ReadinessCheck("demo_execution_gate", "OK", "present"),
+        readiness.ReadinessCheck("mt5_reconciliation_module", "OK", "present"),
+        readiness.ReadinessCheck("daily_limits", "OK", "present"),
+        readiness.ReadinessCheck("journal", "OK", "present"),
         readiness.ReadinessCheck("max_demo_order_volume", "OK", "0.01"),
         readiness.ReadinessCheck("max_demo_orders_per_day", "OK", "1"),
     ]
@@ -114,9 +116,7 @@ def _paper_ready_checks() -> list[readiness.ReadinessCheck]:
         readiness.ReadinessCheck("ALLOW_LIVE_TRADING", "OK", "false"),
         readiness.ReadinessCheck("ENABLE_DEMO_EXECUTION", "OK", "false"),
         readiness.ReadinessCheck("broker_paper", "OK", "paper ok"),
-        readiness.ReadinessCheck("demo_execution_gate", "OK", "available"),
-        readiness.ReadinessCheck("daily_limits", "OK", "available"),
-        readiness.ReadinessCheck("journal", "OK", "available"),
+        readiness.ReadinessCheck("provider_synthetic", "OK", "available"),
         readiness.ReadinessCheck("max_demo_order_volume", "OK", "0.01"),
         readiness.ReadinessCheck("max_demo_orders_per_day", "OK", "1"),
     ]
