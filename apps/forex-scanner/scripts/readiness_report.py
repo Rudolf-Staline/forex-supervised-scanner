@@ -323,7 +323,12 @@ def _provider_synthetic_check() -> ReadinessCheck:
 def _critical_secrets_check() -> ReadinessCheck:
     missing = [name for name in ("DB_PASSWORD",) if not os.getenv(name)]
     if missing:
-        return ReadinessCheck("critical_secrets", "WARN", f"missing optional secrets: {', '.join(missing)}", critical=False)
+        return ReadinessCheck(
+            "critical_secrets",
+            "FAIL",
+            f"missing required secrets: {', '.join(missing)}",
+            critical=False,
+        )
     return ReadinessCheck("critical_secrets", "OK", "critical secrets available or not required")
 
 
