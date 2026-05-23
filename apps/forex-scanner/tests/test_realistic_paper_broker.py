@@ -33,6 +33,9 @@ def test_realistic_paper_broker_rejects_wide_spread_off_hours_close_stop_and_bad
     assert "paper fill rejected: session is not tradable" in simulation.reasons
     assert any("spread/ATR" in reason for reason in simulation.reasons)
     assert "paper fill rejected: stop_loss too close to current spread" in simulation.reasons
+    assumptions = simulation.assumptions()
+    assert assumptions["fill_status"] == "rejected"
+    assert "paper fill rejected:" in assumptions["fill_rejection_reason"]
 
 
 def test_paper_trading_service_uses_realistic_paper_broker(settings) -> None:
