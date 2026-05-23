@@ -12,6 +12,7 @@ Le projet se lance depuis `apps/forex-scanner` et doit rester en mode `paper/dem
 - Aucun ordre réel n'est envoyé dans le mode actuel.
 - Le trading Forex est risqué et peut entraîner des pertes importantes.
 - Le broker live est désactivé et ne doit pas être utilisé pour cette version.
+- Le mode live trading doit rester interdit: ne jamais activer `ALLOW_LIVE_TRADING=true` ni un broker live.
 
 ## Prérequis
 
