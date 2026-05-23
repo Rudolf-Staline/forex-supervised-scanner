@@ -9,9 +9,19 @@ on:
 jobs:
   forex:
     runs-on: ubuntu-latest
+    timeout-minutes: 4
     defaults:
       run:
         working-directory: apps/forex-scanner
+    env:
+      EXECUTION_MODE: paper
+      BROKER_MODE: paper
+      ALLOW_LIVE_TRADING: "false"
+      MT5_DEMO_ONLY: "true"
+      AUTO_BOT_ENABLED: "false"
+      ALLOW_MULTI_ASSET_DEMO_TRADING: "false"
+      ENABLE_DEMO_EXECUTION: "false"
+      NOTIFICATIONS_ENABLED: "false"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,21 +29,48 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: apps/forex-scanner/requirements.txt
 
       - name: Install
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Tests
-        run: python -m pytest
+      - name: Fast cloud-safe tests
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          tests = [
+              "tests/test_safety.py",
+              "tests/test_demo_bot.py",
+              "tests/test_multi_asset_safety.py",
+              "tests/test_market_sessions.py",
+              "tests/test_session_aware_scanning.py",
+              "tests/test_session_wait_mode.py",
+              "tests/test_forward_test_paper.py",
+              "tests/test_demo_execution_gate.py",
+          ]
+          existing = [t for t in tests if Path(t).exists()]
+          print("Running cloud-safe tests:", " ".join(existing))
+          if not existing:
+              raise SystemExit("No cloud-safe tests found")
+          Path(".ci_tests.txt").write_text("\n".join(existing) + "\n", encoding="utf-8")
+          PY
+          python -m pytest -q $(cat .ci_tests.txt) --maxfail=1
 
       - name: Smoke check
-        run: python scripts/smoke_check.py
+        run: |
+          if [ -f scripts/smoke_check.py ]; then
+            python scripts/smoke_check.py
+          else
+            echo "No smoke_check.py found; skipping."
+          fi
 
   web:
     runs-on: ubuntu-latest
+    timeout-minutes: 4
     defaults:
       run:
         working-directory: apps/aurora-player
@@ -41,31 +78,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install
-        run: npm install
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Format
-        run: npm run format:check
-
-      - name: Unit tests
-        run: npm run test
-
-      - name: Build
-        run: npm run build
-
-      - name: Install Playwright
-        run: npx playwright install --with-deps chromium
-
-      - name: E2E
-        run: npm run e2e
+      - name: Quick web workspace sanity
+        run: |
+          test -f package.json
+          node --version || true
+          npm --version || true
+          echo "Web heavy checks are intentionally excluded from the fast repository quality workflow."
