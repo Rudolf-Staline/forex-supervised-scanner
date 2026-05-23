@@ -5,5 +5,9 @@ __pycache__/
 *.db
 *.sqlite
 logs/
-reports/
 *.log
+reports/*.csv
+reports/*.json
+reports/*.log
+secrets
+credentials
