@@ -22,11 +22,11 @@ def test_cli_asset_class_filter_for_multi_asset_watchlist() -> None:
 def test_mt5_demo_broker_blocks_non_forex_by_default(settings, monkeypatch: pytest.MonkeyPatch) -> None:
     _set_mt5_demo_env(monkeypatch)
     fake = _FakeMT5()
-    broker = MT5DemoBroker(settings, mt5_module=fake)
+    broker = MT5DemoBroker(settings, mt5_module=fake, demo_execution_confirmed=True)
     broker.connect()
 
     with pytest.raises(BrokerExecutionError, match="ALLOW_MULTI_ASSET_DEMO_TRADING is false"):
-        broker.place_order(_request("XAU/USD"))
+        broker.place_order(_request("XAU/USD"), gate_passed=True)
 
     assert fake.order_payloads == []
 
@@ -54,6 +54,9 @@ def _set_mt5_demo_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MT5_PASSWORD", "secret")
     monkeypatch.setenv("MT5_SERVER", "Deriv-Demo")
     monkeypatch.setenv("ALLOW_MULTI_ASSET_DEMO_TRADING", "false")
+    monkeypatch.setenv("ENABLE_DEMO_EXECUTION", "true")
+    monkeypatch.setenv("MAX_DEMO_ORDER_VOLUME", "0.01")
+    monkeypatch.setenv("MAX_DEMO_ORDERS_PER_DAY", "1")
 
 
 def _request(symbol: str) -> OrderRequest:

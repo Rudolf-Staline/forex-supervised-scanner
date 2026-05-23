@@ -21,6 +21,11 @@ from app.risk.daily_limits import DailyRiskConfig, evaluate_daily_limits
 from app.risk.position_sizing import PositionSizeResult, calculate_position_size
 
 ALLOW_MULTI_ASSET_DEMO_TRADING_ENV = "ALLOW_MULTI_ASSET_DEMO_TRADING"
+ENABLE_DEMO_EXECUTION_ENV = "ENABLE_DEMO_EXECUTION"
+MAX_DEMO_ORDER_VOLUME_ENV = "MAX_DEMO_ORDER_VOLUME"
+MAX_DEMO_ORDERS_PER_DAY_ENV = "MAX_DEMO_ORDERS_PER_DAY"
+DEFAULT_MAX_DEMO_ORDER_VOLUME = 0.01
+DEFAULT_MAX_DEMO_ORDERS_PER_DAY = 1
 
 
 class DemoExecutionGateBlocked(RuntimeError):
@@ -40,6 +45,7 @@ class DemoExecutionGateContext:
     mt5_symbol: str | None = None
     symbol_info: object | None = None
     symbol_health_ok: bool | None = None
+    demo_execution_confirmed: bool = False
     now: datetime | None = None
     daily_risk_config: DailyRiskConfig | None = None
 
@@ -75,6 +81,10 @@ def evaluate_demo_execution_gate(context: DemoExecutionGateContext) -> DemoExecu
         _append_demo_safe_mode_reasons(context.settings, reasons)
     else:
         _append_mt5_demo_safe_mode_reasons(context.settings, reasons)
+        if os.getenv(ENABLE_DEMO_EXECUTION_ENV, "false").strip().lower() != "true":
+            reasons.append("ENABLE_DEMO_EXECUTION must be true for ultra-limited MT5 demo execution")
+        if not context.demo_execution_confirmed:
+            reasons.append("--demo-execution-confirmed is required before any MT5 demo order")
 
     if context.account is None:
         reasons.append("MT5 demo account state is unavailable")
@@ -144,8 +154,15 @@ def evaluate_demo_execution_gate(context: DemoExecutionGateContext) -> DemoExecu
         for item in comparable_orders
     ):
         reasons.append(f"duplicate open trade for {request.symbol}/{request.setup_subtype.value}")
+    demo_orders_today = _demo_orders_today(comparable_orders, now)
+    max_demo_orders = _env_int(MAX_DEMO_ORDERS_PER_DAY_ENV, DEFAULT_MAX_DEMO_ORDERS_PER_DAY)
+    if demo_orders_today >= max_demo_orders:
+        reasons.append(f"MAX_DEMO_ORDERS_PER_DAY reached: {demo_orders_today}/{max_demo_orders}")
 
     position_size = _position_size(context, instrument, reasons)
+    max_demo_volume = _env_float(MAX_DEMO_ORDER_VOLUME_ENV, DEFAULT_MAX_DEMO_ORDER_VOLUME)
+    if position_size is not None and position_size.final_volume > max_demo_volume:
+        reasons.append(f"final_volume {position_size.final_volume:.4f} exceeds MAX_DEMO_ORDER_VOLUME {max_demo_volume:.4f}")
     details: dict[str, str | float | int | bool | None] = {
         "broker": broker_mode or "unknown",
         "asset_class": instrument.asset_class.value,
@@ -165,6 +182,10 @@ def evaluate_demo_execution_gate(context: DemoExecutionGateContext) -> DemoExecu
         "trades_today": daily.summary.trades_today,
         "position_sizing_status": "available" if position_size is not None else "unavailable",
         "final_volume": position_size.final_volume if position_size is not None else None,
+        "max_demo_order_volume": max_demo_volume,
+        "demo_orders_today": demo_orders_today,
+        "max_demo_orders_per_day": max_demo_orders,
+        "demo_execution_confirmed": context.demo_execution_confirmed,
     }
     return DemoExecutionGateResult(allowed=not reasons, reasons=reasons, details=details, position_size=position_size)
 
@@ -194,6 +215,7 @@ def format_demo_execution_gate_result(order_id: str, result: DemoExecutionGateRe
         f"rr={_fmt(details.get('risk_reward'))} "
         f"spread_atr={_fmt(details.get('spread_atr'))} "
         f"position_sizing_status={details.get('position_sizing_status')} "
+        f"volume={_fmt(details.get('final_volume'))} "
         f"reason={reasons}"
     )
 
@@ -221,13 +243,14 @@ def _position_size(
         reasons.append("position_sizing_unavailable: missing account or symbol_info")
         return None
     try:
+        max_demo_volume = _env_float(MAX_DEMO_ORDER_VOLUME_ENV, DEFAULT_MAX_DEMO_ORDER_VOLUME)
         return calculate_position_size(
             balance=context.account.balance or 0.0,
             risk_percent=instrument.risk_percent,
             entry_price=context.order.request.entry_price,
             stop_loss=context.order.request.stop_loss,
             symbol_info=context.symbol_info,
-            max_volume=instrument.max_volume,
+            max_volume=min(instrument.max_volume, max_demo_volume),
             require_tick_value=instrument.asset_class != AssetClass.FOREX,
         )
     except ValueError as exc:
@@ -264,3 +287,34 @@ def _fmt(value: object) -> str:
     if value is None:
         return "n/a"
     return str(value)
+
+
+def _demo_orders_today(orders: list[ExecutionOrder], now: datetime) -> int:
+    today = now.date()
+    count = 0
+    for order in orders:
+        if order.created_at.date() != today:
+            continue
+        if order.broker_mode == "mt5_demo" or order.broker_name == "mt5" or bool(order.broker_order_id):
+            count += 1
+    return count
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default

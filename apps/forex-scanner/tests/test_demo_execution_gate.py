@@ -24,6 +24,7 @@ def test_demo_execution_gate_allows_clean_forex_mt5_demo_order(settings, monkeyp
             account=_account(),
             symbol_info=_SymbolInfo(),
             symbol_health_ok=True,
+            demo_execution_confirmed=True,
             now=_tradable_time(),
         )
     )
@@ -62,6 +63,7 @@ def test_demo_execution_gate_blocks_non_demo_account_server(settings, monkeypatc
             account=_account(server="Deriv-Live", is_demo=False),
             symbol_info=_SymbolInfo(),
             symbol_health_ok=True,
+            demo_execution_confirmed=True,
             now=_tradable_time(),
         )
     )
@@ -82,6 +84,7 @@ def test_demo_execution_gate_blocks_weak_or_unhealthy_signal(settings, monkeypat
             account=_account(),
             symbol_info=_SymbolInfo(),
             symbol_health_ok=False,
+            demo_execution_confirmed=True,
             now=_tradable_time(),
         )
     )
@@ -105,6 +108,7 @@ def test_demo_execution_gate_blocks_multi_asset_demo_trading_by_default(settings
             account=_account(balance=10_000.0),
             symbol_info=_CommoditySymbolInfo(),
             symbol_health_ok=True,
+            demo_execution_confirmed=True,
             now=_tradable_time(),
         )
     )
@@ -127,6 +131,7 @@ def test_demo_execution_gate_blocks_duplicate_same_symbol_setup(settings, monkey
             account=_account(),
             symbol_info=_SymbolInfo(),
             symbol_health_ok=True,
+            demo_execution_confirmed=True,
             now=_tradable_time(),
         )
     )
@@ -154,6 +159,9 @@ def _set_mt5_demo_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MT5_LOGIN", "123456")
     monkeypatch.setenv("MT5_PASSWORD", "secret")
     monkeypatch.setenv("MT5_SERVER", "Deriv-Demo")
+    monkeypatch.setenv("ENABLE_DEMO_EXECUTION", "true")
+    monkeypatch.setenv("MAX_DEMO_ORDER_VOLUME", "0.01")
+    monkeypatch.setenv("MAX_DEMO_ORDERS_PER_DAY", "1")
 
 
 def _tradable_time() -> datetime:

@@ -10,6 +10,7 @@ from typing import Literal
 from app.config.safety import ensure_demo_bot_safe_mode, ensure_demo_safe_mode
 from app.config.settings import AppSettings
 from app.core.types import Opportunity, OpportunityStatus
+from app.brokers.paper_broker import RealisticPaperBroker
 from app.execution.models import CloseReason, ExecutionOrder, OrderRequest, PaperBlockRecord, TradeEvent, TradeEventType
 from app.execution.paper import PaperExecutor
 from app.execution.validation import PreTradeValidator
@@ -52,6 +53,7 @@ class PaperTradingService:
         guardrails: PortfolioGuardrails | None = None,
         validator: PreTradeValidator | None = None,
         existing_orders: list[ExecutionOrder] | None = None,
+        paper_broker: RealisticPaperBroker | None = None,
     ) -> None:
         self.settings = settings
         ensure_demo_bot_safe_mode(settings, context="paper trading service")
@@ -60,6 +62,7 @@ class PaperTradingService:
             self.executor.seed_orders(existing_orders)
         self.guardrails = guardrails or PortfolioGuardrails(settings)
         self.validator = validator or PreTradeValidator(settings, self.guardrails)
+        self.paper_broker = paper_broker or RealisticPaperBroker()
 
     def submit_approved(self, opportunities: list[Opportunity]) -> PaperTradingResult:
         """Create paper orders for approved or premium opportunities that pass guardrails."""
@@ -84,8 +87,14 @@ class PaperTradingService:
                 blocked[key] = [str(exc)]
                 block_records.append(_block_record(opportunity, [str(exc)], decision.portfolio_snapshot))
                 continue
+            fill = self.paper_broker.simulate_request(request)
+            if not fill.accepted:
+                blocked[key] = fill.reasons
+                block_records.append(_block_record(opportunity, fill.reasons, {**decision.portfolio_snapshot, **fill.assumptions()}))
+                continue
             order = self.executor.place_order(request)
-            created.append(self.executor.set_portfolio_snapshot(order.order_id, decision.portfolio_snapshot))
+            order = self.executor.set_portfolio_snapshot(order.order_id, decision.portfolio_snapshot)
+            created.append(self.paper_broker.decorate_order(order, fill))
         return PaperTradingResult(orders=created, blocked=blocked, block_records=block_records)
 
 

@@ -55,7 +55,7 @@ def test_mt5_demo_broker_refuses_non_demo_account(settings, monkeypatch: pytest.
     _set_mt5_demo_env(monkeypatch)
     fake = _FakeMT5(account=_Account(trade_mode=1, server="Deriv-Demo"))
 
-    broker = MT5DemoBroker(settings, mt5_module=fake)
+    broker = MT5DemoBroker(settings, mt5_module=fake, demo_execution_confirmed=True)
 
     with pytest.raises(BrokerExecutionError, match="not a demo account"):
         broker.connect()
@@ -68,22 +68,24 @@ def test_mt5_demo_broker_places_tiny_demo_order_without_storing_password(setting
     monkeypatch.setenv("MAX_VOLUME_PER_TRADE", "0.05")
     monkeypatch.setenv("POSITION_SIZING_MODE", "auto")
     fake = _FakeMT5(account=_Account())
-    broker = MT5DemoBroker(settings, mt5_module=fake)
+    broker = MT5DemoBroker(settings, mt5_module=fake, demo_execution_confirmed=True)
     broker.connect()
 
-    order = broker.place_order(_request())
+    order = broker.place_order(_request(), gate_passed=True)
 
     assert order.broker_mode == "mt5_demo"
     assert order.execution_assumptions["live_money"] is False
     assert order.execution_assumptions["demo_only"] is True
     assert order.execution_assumptions["risk_percent"] == 0.25
-    assert order.execution_assumptions["final_volume"] == 0.05
-    assert order.request.quantity_units == 0.05
+    assert order.execution_assumptions["final_volume"] == 0.01
+    assert order.request.quantity_units == 0.01
     assert order.broker_order_id == "123456"
     assert order.broker_acknowledgement["filling_mode"] == "FOK"
     assert "super-secret-password" not in str(order.broker_submission)
     assert "super-secret-password" not in str(order.execution_assumptions)
-    assert fake.last_order_payload["volume"] == 0.05
+    assert fake.last_order_payload["volume"] == 0.01
+    assert fake.last_order_payload["magic"] == 260522
+    assert str(fake.last_order_payload["comment"]).startswith("ForexSupervisor|forex|EUR/USD")
     assert fake.last_order_payload["sl"] == 1.095
     assert fake.last_order_payload["tp"] == 1.11
     assert [payload["type_filling"] for payload in fake.order_payloads] == [fake.ORDER_FILLING_IOC, fake.ORDER_FILLING_FOK]
@@ -93,11 +95,11 @@ def test_mt5_demo_broker_refuses_invalid_position_size_before_order_send(setting
     _set_mt5_demo_env(monkeypatch)
     fake = _FakeMT5(account=_Account())
     fake.symbol_info_override = _InvalidVolumeSymbolInfo()
-    broker = MT5DemoBroker(settings, mt5_module=fake)
+    broker = MT5DemoBroker(settings, mt5_module=fake, demo_execution_confirmed=True)
     broker.connect()
 
     with pytest.raises(BrokerExecutionError, match="position sizing failed"):
-        broker.place_order(_request())
+        broker.place_order(_request(), gate_passed=True)
 
     assert fake.order_payloads == []
 
@@ -111,6 +113,9 @@ def _set_mt5_demo_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MT5_LOGIN", "123456")
     monkeypatch.setenv("MT5_PASSWORD", "secret")
     monkeypatch.setenv("MT5_SERVER", "Deriv-Demo")
+    monkeypatch.setenv("ENABLE_DEMO_EXECUTION", "true")
+    monkeypatch.setenv("MAX_DEMO_ORDER_VOLUME", "0.01")
+    monkeypatch.setenv("MAX_DEMO_ORDERS_PER_DAY", "1")
 
 
 def _request() -> OrderRequest:

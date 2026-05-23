@@ -91,6 +91,11 @@ def add_cycle_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Explain why created paper orders would or would not pass the strict MT5 demo execution gate.",
     )
+    parser.add_argument(
+        "--demo-execution-confirmed",
+        action="store_true",
+        help="Required explicit operator confirmation before any ultra-limited MT5 demo order can be submitted.",
+    )
 
 
 def load_demo_runtime(
@@ -301,10 +306,24 @@ def created_order_ids(result: DemoBotCycleResult) -> list[str]:
     return [order_id for decision in result.decisions for order_id in decision.order_ids]
 
 
-def print_broker_result(order_id: str, broker_order_id: str | None) -> None:
+def print_broker_result(order_id: str, broker_order_id: str | None, broker_order: ExecutionOrder | None = None) -> None:
     """Print one MT5 demo submission result."""
 
-    print(f"broker_submit=ok mode=mt5_demo paper_order_id={order_id} broker_order_id={broker_order_id or '-'}")
+    if broker_order is None:
+        print(f"broker_submit=ok mode=mt5_demo paper_order_id={order_id} broker_order_id={broker_order_id or '-'}")
+        return
+    acknowledgement = broker_order.broker_acknowledgement
+    print(
+        "broker_submit=ok mode=mt5_demo "
+        f"paper_order_id={order_id} "
+        f"order_id={broker_order.order_id} "
+        f"broker_order_id={broker_order_id or '-'} "
+        f"retcode={acknowledgement.get('retcode', '-')} "
+        f"broker_comment=\"{acknowledgement.get('comment', '')}\" "
+        f"filled_price={broker_order.average_fill_price or broker_order.simulated_entry or '-'} "
+        f"volume={broker_order.request.quantity_units} "
+        f"timestamp={broker_order.created_at.isoformat()}"
+    )
 
 
 def print_execution_gate_explanations(
@@ -354,6 +373,7 @@ def evaluate_order_execution_gate(
     mt5=None,
     mt5_symbol: str | None = None,
     symbol_info=None,
+    demo_execution_confirmed: bool = False,
 ):
     """Evaluate the strict MT5 demo gate for one created paper order."""
 
@@ -367,6 +387,7 @@ def evaluate_order_execution_gate(
             mt5=mt5,
             mt5_symbol=mt5_symbol,
             symbol_info=symbol_info,
+            demo_execution_confirmed=demo_execution_confirmed,
         )
     )
 

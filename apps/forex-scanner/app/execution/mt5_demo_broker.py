@@ -22,6 +22,7 @@ from app.data.mt5_symbol_resolver import MT5SymbolResolver
 from app.execution.broker import BrokerExecutionError, append_broker_transition
 from app.execution.models import BrokerAccountState, BrokerErrorCategory, BrokerOrderState, ExecutionOrder, OrderRequest, OrderStatus, TradeEventType
 from app.execution.mt5_filling import filling_attempts_payload, resolve_mt5_filling_mode_or_try_fallbacks
+from app.brokers.mt5_reconciliation import build_standard_order_comment, forex_scanner_magic_number
 from app.risk.position_sizing import PositionSizeResult, calculate_position_size
 
 MT5_DEMO_MODE = "mt5_demo"
@@ -36,6 +37,9 @@ POSITION_SIZING_MODE_ENV = "POSITION_SIZING_MODE"
 DEFAULT_RISK_PER_TRADE_PERCENT = 0.25
 DEFAULT_MAX_VOLUME_PER_TRADE = 0.05
 ALLOW_MULTI_ASSET_DEMO_TRADING_ENV = "ALLOW_MULTI_ASSET_DEMO_TRADING"
+ENABLE_DEMO_EXECUTION_ENV = "ENABLE_DEMO_EXECUTION"
+MAX_DEMO_ORDER_VOLUME_ENV = "MAX_DEMO_ORDER_VOLUME"
+DEFAULT_MAX_DEMO_ORDER_VOLUME = 0.01
 
 LOGGER = logging.getLogger(__name__)
 
@@ -69,7 +73,7 @@ class MT5SymbolMapper:
 class MT5DemoBroker:
     """Demo-only MT5 adapter for explicit FTMO Free Trial testing."""
 
-    def __init__(self, settings: AppSettings, *, mt5_module: object | None = None) -> None:
+    def __init__(self, settings: AppSettings, *, mt5_module: object | None = None, demo_execution_confirmed: bool = False) -> None:
         try:
             ensure_mt5_demo_safe_mode(settings, context="MT5 demo broker")
         except DemoSafetyError as exc:
@@ -79,6 +83,7 @@ class MT5DemoBroker:
         self.connected = False
         self.mapper: MT5SymbolMapper | None = None
         self.account: object | None = None
+        self.demo_execution_confirmed = demo_execution_confirmed
 
     def connect(self) -> BrokerAccountState:
         """Connect to MT5 and refuse non-demo accounts."""
@@ -144,9 +149,10 @@ class MT5DemoBroker:
             raise BrokerExecutionError("MT5 account is not a demo account; refusing mt5_demo mode", BrokerErrorCategory.CONFIGURATION)
         return _account_state(account)
 
-    def place_order(self, request: OrderRequest) -> ExecutionOrder:
+    def place_order(self, request: OrderRequest, *, gate_passed: bool = False) -> ExecutionOrder:
         """Place a very small pending order on the connected demo account."""
 
+        self._ensure_ultra_limited_demo_execution_enabled(gate_passed=gate_passed)
         mt5 = self._connected_mt5()
         account = self.query_account_state()
         if not account.can_trade:
@@ -272,8 +278,26 @@ class MT5DemoBroker:
             raise BrokerExecutionError("MT5 demo connection was not established", BrokerErrorCategory.CONNECTIVITY)
         return self.mt5
 
+    def _ensure_ultra_limited_demo_execution_enabled(self, *, gate_passed: bool) -> None:
+        if os.getenv(ENABLE_DEMO_EXECUTION_ENV, "false").strip().lower() != "true":
+            raise BrokerExecutionError(
+                "ENABLE_DEMO_EXECUTION must be true before any MT5 demo order",
+                BrokerErrorCategory.CONFIGURATION,
+            )
+        if not self.demo_execution_confirmed:
+            raise BrokerExecutionError(
+                "--demo-execution-confirmed is required before any MT5 demo order",
+                BrokerErrorCategory.CONFIGURATION,
+            )
+        if not gate_passed:
+            raise BrokerExecutionError(
+                "demo_execution_gate must pass before any MT5 demo order",
+                BrokerErrorCategory.CONFIGURATION,
+            )
+
 
 def _order_payload(mt5: object, symbol: str, request: OrderRequest, ask: float, bid: float, settings: AppSettings) -> dict[str, object]:
+    instrument = instrument_for_symbol(request.symbol)
     return {
         "action": getattr(mt5, "TRADE_ACTION_PENDING"),
         "symbol": symbol,
@@ -283,8 +307,13 @@ def _order_payload(mt5: object, symbol: str, request: OrderRequest, ask: float, 
         "sl": request.stop_loss,
         "tp": request.take_profit,
         "deviation": settings.broker.order_deviation_points,
-        "magic": settings.broker.magic_number,
-        "comment": f"{settings.broker.comment_prefix}:mt5_demo"[:31],
+        "magic": forex_scanner_magic_number(),
+        "comment": build_standard_order_comment(
+            asset_class=instrument.asset_class.value,
+            symbol=request.symbol,
+            setup=request.setup_subtype.value,
+            cycle_id=request.source_opportunity_id or "manual",
+        ),
         "type_time": getattr(mt5, "ORDER_TIME_GTC"),
     }
 
@@ -300,7 +329,9 @@ def _pending_order_type(mt5: object, request: OrderRequest, ask: float, bid: flo
 def _demo_position_size(account: BrokerAccountState, request: OrderRequest, symbol_info: object) -> PositionSizeResult:
     instrument = instrument_for_symbol(request.symbol)
     mode = os.getenv(POSITION_SIZING_MODE_ENV, "auto").strip().lower() or "auto"
-    max_volume = instrument.max_volume if instrument.asset_class != AssetClass.FOREX else _env_float(MAX_VOLUME_PER_TRADE_ENV, DEFAULT_MAX_VOLUME_PER_TRADE)
+    hard_max_volume = _env_float(MAX_DEMO_ORDER_VOLUME_ENV, DEFAULT_MAX_DEMO_ORDER_VOLUME)
+    configured_max_volume = instrument.max_volume if instrument.asset_class != AssetClass.FOREX else _env_float(MAX_VOLUME_PER_TRADE_ENV, DEFAULT_MAX_VOLUME_PER_TRADE)
+    max_volume = min(configured_max_volume, hard_max_volume)
     require_tick_value = instrument.asset_class != AssetClass.FOREX
     if mode != "auto":
         fixed_volume = min(float(request.quantity_units), max_volume)
