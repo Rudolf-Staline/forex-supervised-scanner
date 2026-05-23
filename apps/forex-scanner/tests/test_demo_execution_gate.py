@@ -141,6 +141,48 @@ def test_demo_execution_gate_blocks_duplicate_same_symbol_setup(settings, monkey
     assert "duplicate open trade for EUR/USD/ema50_pullback" in result.reasons
 
 
+def test_demo_execution_gate_blocks_invalid_execution_mode(settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_mt5_demo_env(monkeypatch)
+    monkeypatch.setenv("EXECUTION_MODE", "broker_live")
+
+    result = evaluate_demo_execution_gate(
+        DemoExecutionGateContext(
+            settings=settings,
+            order=_order(),
+            broker_mode="mt5_demo",
+            account=_account(),
+            symbol_info=_SymbolInfo(),
+            symbol_health_ok=True,
+            demo_execution_confirmed=True,
+            now=_tradable_time(),
+        )
+    )
+
+    assert not result.allowed
+    assert "EXECUTION_MODE must be paper or demo, got broker_live" in result.reasons
+
+
+def test_demo_execution_gate_blocks_if_allow_live_trading_true(settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_mt5_demo_env(monkeypatch)
+    monkeypatch.setenv("ALLOW_LIVE_TRADING", "true")
+
+    result = evaluate_demo_execution_gate(
+        DemoExecutionGateContext(
+            settings=settings,
+            order=_order(),
+            broker_mode="mt5_demo",
+            account=_account(),
+            symbol_info=_SymbolInfo(),
+            symbol_health_ok=True,
+            demo_execution_confirmed=True,
+            now=_tradable_time(),
+        )
+    )
+
+    assert not result.allowed
+    assert "ALLOW_LIVE_TRADING must be false, got true" in result.reasons
+
+
 def test_cycle_cli_accepts_explain_execution_gate_argument() -> None:
     parser = argparse.ArgumentParser()
     add_cycle_arguments(parser)

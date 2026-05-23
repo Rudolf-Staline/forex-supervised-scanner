@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.brokers.mt5_reconciliation import reconcile_mt5_demo
+from app.brokers.mt5_reconciliation import MT5ReconciliationReport, reconcile_mt5_demo
 from app.config.env import load_dotenv
 from app.config.safety import DemoSafetyError, ensure_mt5_demo_safe_mode
 from app.config.settings import load_settings
@@ -48,7 +48,22 @@ def main() -> None:
             history_days=args.history_days,
         )
     except BrokerExecutionError as exc:
-        raise SystemExit(f"mt5_connected=false reason={exc}") from exc
+        print("MT5 terminal is not available in cloud environment")
+        print_reconciliation_report(
+            MT5ReconciliationReport(
+                mt5_connected=False,
+                account_server="-",
+                demo_only=False,
+                open_positions=0,
+                pending_orders=0,
+                bot_positions=0,
+                foreign_positions=0,
+                duplicate_risk=False,
+                reconciliation_status="BLOCKED",
+                reasons=[f"mt5_unavailable reason={exc}"],
+            )
+        )
+        return
     finally:
         broker.disconnect()
 
