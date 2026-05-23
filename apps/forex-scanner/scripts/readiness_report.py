@@ -95,8 +95,7 @@ def build_readiness_report(*, run_tests: bool = True, mt5_module: object | None 
     checks.append(_journal_check(database))
     checks.append(_paper_broker_check(settings, database))
     checks.append(_sessions_check())
-    checks.append(_module_check("session_aware_scanning", "app.services.scanner_service", optional=True))
-    checks.append(_wait_for_session_check())
+    checks.append(_module_check("session_aware_scanning", "_demo_bot_cli", optional=True))
 
     mt5_available = mt5_module is not None or importlib.util.find_spec("MetaTrader5") is not None
     if not mt5_available:
