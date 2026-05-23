@@ -21,6 +21,7 @@ from app.core.types import TradingStyle
 from app.execution.demo_bot import DemoBotService
 from app.execution.mt5_demo_broker import MT5DemoBroker
 from app.notifications.notifier import notify_cycle_result
+from app.reporting.signal_journal import append_cycle_signal_journal
 
 
 def main() -> None:
@@ -47,6 +48,17 @@ def main() -> None:
         return
     print(f"runtime provider={provider.name} broker={args.broker} mode=paper")
     result = DemoBotService(settings, provider, database).run_cycle(style, symbols, watchlist=args.watchlist)
+    rejected_records = [record for record in database.load_rejected_signals() if record.cycle_id == result.cycle_id]
+    created_orders = [order for order in database.load_paper_orders() if order.order_id in created_order_ids(result)]
+    append_cycle_signal_journal(
+        result,
+        provider=provider.name,
+        broker=args.broker,
+        mode=settings.execution.mode,
+        watchlist=args.watchlist,
+        rejected_records=rejected_records,
+        created_orders=created_orders,
+    )
     print_cycle_result(result)
     notify_cycle_result(result, broker_mode=args.broker)
     if args.explain_execution_gate and args.broker != "mt5_demo":
