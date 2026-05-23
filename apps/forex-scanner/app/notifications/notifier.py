@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Protocol, TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from app.config.instruments import instrument_for_symbol
 from app.data.mt5_symbol_resolver import mt5_symbol_override_for
@@ -30,27 +30,28 @@ ALERT_MIN_SCORE_ENV = "ALERT_MIN_SCORE"
 class AlertPayload:
     """One informational alert. It contains no trade-execution command."""
 
-    timestamp: str
+    timestamp_utc: str
     asset_class: str
-    symbol: str
+    logical_symbol: str
     mt5_symbol: str
     setup: str
+    status: str
     score: float | None
     risk_reward: float | None
     pattern_score: float
     detected_patterns: list[str]
     session_name: str
     reasons: list[str]
-    broker_mode: str
+    broker: str
+    mode: str
     safety_status: str
+    near_miss: bool = False
     alert_type: str = "signal"
     action: str = "read_only_no_trade_execution"
 
 
 @dataclass(frozen=True)
 class NotificationSettings:
-    """Environment-driven notification settings."""
-
     enabled: bool = False
     channel: str = "console"
     alert_min_score: float = 70.0
@@ -67,22 +68,15 @@ class NotificationSettings:
 
 
 class NotificationChannel(Protocol):
-    """Simple channel protocol for future Telegram/Discord/email adapters."""
-
-    def send(self, alert: AlertPayload) -> None:
-        """Send one alert."""
+    def send(self, alert: AlertPayload) -> None: ...
 
 
 class ConsoleNotificationChannel:
-    """Console notification channel."""
-
     def send(self, alert: AlertPayload) -> None:
         print(f"notification {json.dumps(asdict(alert), sort_keys=True)}")
 
 
 class FileNotificationChannel:
-    """Append alerts to reports/alerts.log."""
-
     def __init__(self, path: Path = ALERTS_LOG) -> None:
         self.path = path
 
@@ -93,8 +87,6 @@ class FileNotificationChannel:
 
 
 class CompositeNotificationChannel:
-    """Fan out alerts to multiple channels."""
-
     def __init__(self, channels: list[NotificationChannel]) -> None:
         self.channels = channels
 
@@ -104,13 +96,13 @@ class CompositeNotificationChannel:
 
 
 class PlaceholderNotificationChannel:
-    """Placeholder for optional external channels that are not configured yet."""
+    """Extensible placeholder for Telegram/Discord/email without required setup."""
 
     def __init__(self, name: str) -> None:
         self.name = name
 
     def send(self, alert: AlertPayload) -> None:
-        print(f"notification_channel_unconfigured channel={self.name} alert_symbol={alert.symbol}")
+        print(f"notification_channel_unconfigured channel={self.name} alert_symbol={alert.logical_symbol}")
 
 
 def notify_cycle_result(
@@ -120,8 +112,6 @@ def notify_cycle_result(
     settings: NotificationSettings | None = None,
     session_by_symbol: dict[str, MarketSessionInfo] | None = None,
 ) -> list[AlertPayload]:
-    """Send alerts for interesting decisions from one demo-bot cycle."""
-
     settings = settings or NotificationSettings.from_env()
     alerts = [
         build_signal_alert(decision, broker_mode=broker_mode, session=session_by_symbol.get(decision.symbol) if session_by_symbol else None)
@@ -137,8 +127,6 @@ def notify_session_transition(
     broker_mode: str,
     settings: NotificationSettings | None = None,
 ) -> AlertPayload | None:
-    """Alert when a symbol changes from off-hours to a tradable session."""
-
     settings = settings or NotificationSettings.from_env()
     if not settings.enabled:
         return None
@@ -147,18 +135,20 @@ def notify_session_transition(
     _save_session_state(settings.session_state_path, session.symbol, session)
     if session.is_tradable_session and was_tradable is False:
         alert = AlertPayload(
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp_utc=datetime.now(timezone.utc).isoformat(),
             asset_class=session.asset_class,
-            symbol=session.symbol,
+            logical_symbol=session.symbol,
             mt5_symbol=_mt5_symbol(session.symbol),
             setup="session_transition",
+            status="detected",
             score=None,
             risk_reward=None,
             pattern_score=0.0,
             detected_patterns=[],
             session_name=session.session_name,
             reasons=["symbol moved from off_hours to tradable session"],
-            broker_mode=broker_mode,
+            broker=broker_mode,
+            mode="paper",
             safety_status=safety_status_for_broker(broker_mode),
             alert_type="session_transition",
         )
@@ -167,77 +157,62 @@ def notify_session_transition(
     return None
 
 
+
 def update_session_notification_state(
     session: MarketSessionInfo,
     *,
     settings: NotificationSettings | None = None,
 ) -> None:
-    """Persist current session state without sending an alert."""
-
     settings = settings or NotificationSettings.from_env()
     if not settings.enabled:
         return
     _save_session_state(settings.session_state_path, session.symbol, session)
 
-
 def should_alert_decision(decision: "DemoBotDecision", settings: NotificationSettings | None = None) -> bool:
-    """Return true when a bot decision is interesting enough to notify."""
-
     settings = settings or NotificationSettings.from_env()
-    score = decision.final_score or 0.0
-    valid_setup = bool(decision.setup_subtype and decision.setup_subtype != "none")
     return (
-        score >= settings.alert_min_score
+        (decision.final_score or 0.0) >= settings.alert_min_score
         or (decision.pattern_score or 0.0) > 0.0
-        or (decision.status in {"watchlist", "detected"} and valid_setup)
+        or decision.status in {"watchlist", "detected"}
         or is_near_miss_decision(decision, settings=settings)
     )
 
 
 def is_near_miss_decision(decision: "DemoBotDecision", settings: NotificationSettings | None = None) -> bool:
-    """Return true for near-miss signal decisions."""
-
     settings = settings or NotificationSettings.from_env()
-    score = decision.final_score or 0.0
-    valid_setup = bool(decision.setup_subtype and decision.setup_subtype != "none")
     reasons = " ".join(decision.reasons).lower()
-    return (
-        score >= max(55.0, settings.alert_min_score - 15.0)
-        or (decision.pattern_score or 0.0) > 0.0
-        or decision.status in {"watchlist", "detected"}
-        or (valid_setup and ("session" in reasons or "off-hours" in reasons or "scan_only" in reasons))
+    return (decision.final_score or 0.0) >= max(55.0, settings.alert_min_score - 15.0) and (
+        "near" in reasons or "miss" in reasons or "threshold" in reasons
     )
 
 
-def build_signal_alert(
-    decision: "DemoBotDecision",
-    *,
-    broker_mode: str,
-    session: MarketSessionInfo | None = None,
-) -> AlertPayload:
-    """Build a read-only alert payload from a demo-bot decision."""
-
+def build_signal_alert(decision: "DemoBotDecision", *, broker_mode: str, session: MarketSessionInfo | None = None) -> AlertPayload:
     instrument = instrument_for_symbol(decision.symbol)
+    near_miss = is_near_miss_decision(decision)
+    reasons = list(decision.reasons)
+    if near_miss and "near_miss detected" not in reasons:
+        reasons.append("near_miss detected")
     return AlertPayload(
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp_utc=datetime.now(timezone.utc).isoformat(),
         asset_class=instrument.asset_class.value,
-        symbol=decision.symbol,
+        logical_symbol=decision.symbol,
         mt5_symbol=_mt5_symbol(decision.symbol),
         setup=decision.setup_subtype,
+        status=decision.status,
         score=decision.final_score,
         risk_reward=decision.risk_reward,
         pattern_score=decision.pattern_score,
         detected_patterns=list(decision.detected_patterns),
         session_name=session.session_name if session else _session_from_reasons(decision.reasons),
-        reasons=list(decision.reasons),
-        broker_mode=broker_mode,
+        reasons=reasons,
+        broker=broker_mode,
+        mode="paper",
         safety_status=safety_status_for_broker(broker_mode),
+        near_miss=near_miss,
     )
 
 
 def send_alerts(alerts: list[AlertPayload], *, settings: NotificationSettings | None = None) -> list[AlertPayload]:
-    """Send alerts if notifications are enabled."""
-
     settings = settings or NotificationSettings.from_env()
     if not settings.enabled:
         return []
@@ -248,8 +223,6 @@ def send_alerts(alerts: list[AlertPayload], *, settings: NotificationSettings | 
 
 
 def build_channel(settings: NotificationSettings) -> NotificationChannel:
-    """Build a notification channel from settings."""
-
     if settings.channel == "console":
         return ConsoleNotificationChannel()
     if settings.channel == "file":
@@ -262,8 +235,6 @@ def build_channel(settings: NotificationSettings) -> NotificationChannel:
 
 
 def safety_status_for_broker(broker_mode: str) -> str:
-    """Return operator-readable safety status for an alert."""
-
     broker = broker_mode.strip().lower() or "paper"
     return (
         f"demo_only=true live_trading_disabled=true broker={broker} "
