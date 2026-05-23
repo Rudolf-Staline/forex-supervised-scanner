@@ -109,20 +109,53 @@ def test_run_forward_test_uses_paper_runtime_and_one_cycle(settings, monkeypatch
     monkeypatch.setattr(forward_test, "FORWARD_TEST_SUMMARY_JSON", tmp_path / "summary.json")
 
     summary = forward_test.run_forward_test(
+        provider="synthetic",
         duration_days=1,
         interval_seconds=300,
         asset_class="forex",
         style=TradingStyle.DAY_TRADING,
         export_report=True,
+        skip_unhealthy_symbols=False,
+        only_tradable_session=True,
+        show_next_windows=False,
         max_cycles=1,
     )
 
-    assert calls["runtime"] == {"context": "forward_test_paper.py", "provider": "mt5", "broker": "paper"}
+    assert calls["runtime"] == {"context": "forward_test_paper.py", "provider": "synthetic", "broker": "paper"}
     assert calls["cycle"] == {"style": "day_trading", "symbols": ["EUR/USD"], "watchlist": "multi_asset_demo"}
     assert summary["total_cycles"] == 1
     assert summary["total_signals"] == 1
     assert (tmp_path / "forward.csv").exists()
     assert (tmp_path / "summary.json").exists()
+
+
+def test_main_rejects_non_paper_broker(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(sys, "argv", ["forward_test_paper.py", "--broker", "mt5_demo"])
+    try:
+        forward_test.main()
+        raise AssertionError("main() should exit for non-paper broker")
+    except SystemExit:
+        captured = capsys.readouterr()
+        assert "broker_must_be_paper=true" in captured.out
+
+
+def test_provider_mt5_unavailable_message(monkeypatch) -> None:
+    def fake_load_runtime(*args, **kwargs):
+        raise SystemExit("MetaTrader5 import failed")
+
+    monkeypatch.setattr(forward_test, "load_demo_runtime", fake_load_runtime)
+    try:
+        forward_test.run_forward_test(
+            provider="mt5",
+            duration_days=1,
+            interval_seconds=300,
+            asset_class="forex",
+            style=TradingStyle.DAY_TRADING,
+            export_report=False,
+        )
+        raise AssertionError("run_forward_test should exit")
+    except SystemExit as exc:
+        assert "provider_mt5_unavailable_in_this_environment=true" in str(exc)
 
 
 def _cycle_result() -> DemoBotCycleResult:
