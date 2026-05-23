@@ -78,8 +78,8 @@ def build_readiness_report(*, run_tests: bool = True, mt5_module: object | None 
     checks.append(_tests_check(run_tests))
     checks.append(_critical_secrets_check())
     checks.append(_provider_synthetic_check())
-    checks.append(_environment_check("ALLOW_LIVE_TRADING", "false"))
-    checks.append(_environment_check("MT5_DEMO_ONLY", "true", critical=False))
+    checks.append(_environment_check("ALLOW_LIVE_TRADING", "false", default="false"))
+    checks.append(_environment_check("MT5_DEMO_ONLY", "true", default="true", critical=False))
     checks.append(_environment_default_false_check("ENABLE_DEMO_EXECUTION"))
     checks.append(_environment_default_false_check("ALLOW_MULTI_ASSET_DEMO_TRADING"))
     checks.append(_max_demo_volume_check())
@@ -268,8 +268,8 @@ def _mt5_checks(settings, database: Database, *, mt5_module: object | None) -> t
     return checks, report
 
 
-def _environment_check(name: str, expected: str, *, critical: bool = True) -> ReadinessCheck:
-    actual = os.getenv(name, "")
+def _environment_check(name: str, expected: str, *, default: str = "", critical: bool = True) -> ReadinessCheck:
+    actual = os.getenv(name, default)
     status = "OK" if actual.strip().lower() == expected else "FAIL"
     return ReadinessCheck(name, status, f"expected={expected} actual={actual or '<missing>'}", critical=critical)
 

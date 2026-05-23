@@ -1,0 +1,56 @@
+name: Forex Scanner Tests
+
+on:
+  push:
+    paths:
+      - 'apps/forex-scanner/**'
+      - '.github/workflows/tests.yml'
+  pull_request:
+    paths:
+      - 'apps/forex-scanner/**'
+      - '.github/workflows/tests.yml'
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/forex-scanner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          if python -m pip install -e ".[dev]"; then
+            echo "Installed editable dev dependencies"
+          elif [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          else
+            echo "No install source found (. [dev] or requirements.txt)." >&2
+            exit 1
+          fi
+
+      - name: Run cloud-safe test suite
+        env:
+          EXECUTION_MODE: paper
+          ALLOW_LIVE_TRADING: "false"
+          BROKER_MODE: paper
+          AUTO_BOT_ENABLED: "false"
+          MT5_DEMO_ONLY: "true"
+        run: |
+          python -m pytest tests/test_safety.py
+          python -m pytest tests/test_demo_bot.py
+          python -m pytest tests/test_multi_asset_safety.py
+          python -m pytest tests/test_market_sessions.py
+          python -m pytest tests/test_session_aware_scanning.py
+          python -m pytest tests/test_session_wait_mode.py

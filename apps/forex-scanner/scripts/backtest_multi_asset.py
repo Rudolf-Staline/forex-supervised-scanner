@@ -83,7 +83,11 @@ def main() -> None:
     settings = load_settings().model_copy(deep=True)
     settings.provider.name = args.provider
     database = Database(settings.database_absolute_path)
-    provider = build_provider(settings)
+    try:
+        provider = build_provider(settings)
+    except Exception as exc:
+        _handle_mt5_provider_unavailable(args.provider, exc)
+        raise
     style = TradingStyle(args.style)
     end = _parse_date(args.to_date) if args.to_date else datetime.now(timezone.utc)
     start = _parse_date(args.from_date) if args.from_date else end - timedelta(days=14)
@@ -97,7 +101,11 @@ def main() -> None:
         f"only_tradable_session={str(args.only_tradable_session).lower()}"
     )
 
-    result = Backtester(settings, provider, database).run(symbols, style, "all", start, end)
+    try:
+        result = Backtester(settings, provider, database).run(symbols, style, "all", start, end)
+    except Exception as exc:
+        _handle_mt5_provider_unavailable(args.provider, exc)
+        raise
     trades = filter_backtest_trades(
         result.trades,
         min_score=args.min_score,
@@ -111,13 +119,18 @@ def main() -> None:
         end=end,
     )
     rows = build_backtest_rows(trades, rejected)
-    summary = build_backtest_summary(trades, rows)
+    off_hours_skipped = _count_off_hours_skipped(
+        result.trades,
+        min_score=args.min_score,
+        only_tradable_session=args.only_tradable_session,
+    )
+    summary = build_backtest_summary(trades, rows, off_hours_skipped=off_hours_skipped, limitations=result.limitations)
     _print_report(result.trades, trades, rejected, rows, summary, limitations=result.limitations)
+    export_summary_json(summary, SUMMARY_PATH)
     if args.export_csv:
         export_backtest_csv(rows, CSV_PATH)
-        export_summary_json(summary, SUMMARY_PATH)
         print(f"csv_export={CSV_PATH}")
-        print(f"summary_json_export={SUMMARY_PATH}")
+    print(f"summary_json_export={SUMMARY_PATH}")
 
 
 def filter_backtest_trades(
@@ -183,14 +196,26 @@ def build_backtest_rows(
     return rows
 
 
-def build_backtest_summary(trades: list[TradeRecord], rows: list[BacktestMultiAssetRow]) -> dict:
+def build_backtest_summary(
+    trades: list[TradeRecord],
+    rows: list[BacktestMultiAssetRow],
+    *,
+    off_hours_skipped: int = 0,
+    limitations: list[str] | None = None,
+) -> dict:
     """Build terminal/JSON summary sections."""
 
     return {
         "warning": WARNING,
+        "summary": {
+            "total_groups": len(rows),
+            "total_trades_simulated": sum(row.total_trades_simulated for row in rows),
+            "off_hours_skipped": off_hours_skipped,
+        },
         "best_markets_by_expectancy": _best_markets_by_expectancy(rows),
         "best_sessions": _best_sessions(rows),
         "setup_quality": _setup_quality(trades),
+        "warnings": limitations or [],
     }
 
 
@@ -363,6 +388,13 @@ def _print_report(
 
 
 def _print_summary(summary: dict) -> None:
+    print("summary:")
+    compact_summary = summary.get("summary", {})
+    print(
+        f"- total_groups={compact_summary.get('total_groups', 0)} "
+        f"total_trades_simulated={compact_summary.get('total_trades_simulated', 0)} "
+        f"off_hours_skipped={compact_summary.get('off_hours_skipped', 0)}"
+    )
     print("best_markets_by_expectancy:")
     for asset in AssetClass:
         values = summary["best_markets_by_expectancy"].get(asset.value, [])
@@ -377,6 +409,12 @@ def _print_summary(summary: dict) -> None:
             f"expectancy_R={data['expectancy_R']:.4f} best_asset_class=\"{data['best_asset_class']}\" "
             f"failing_symbols={','.join(data['failing_symbols']) or '-'}"
         )
+    print("warnings:")
+    warnings = summary.get("warnings", [])
+    if not warnings:
+        print("- none")
+    for item in warnings:
+        print(f"- {item}")
 
 
 def _format_counter(counter: Counter[str], *, limit: int) -> str:
@@ -397,6 +435,29 @@ def _parse_date(value: str) -> datetime:
 def _quiet_expected_provider_failures() -> None:
     logging.getLogger("app.backtest.engine").setLevel(logging.CRITICAL)
     logging.getLogger("app.data.providers").setLevel(logging.CRITICAL)
+
+
+def _count_off_hours_skipped(trades: list[TradeRecord], *, min_score: float, only_tradable_session: bool) -> int:
+    if not only_tradable_session:
+        return 0
+    count = 0
+    for trade in trades:
+        if trade.final_score is None or trade.final_score < min_score:
+            continue
+        instrument = instrument_for_symbol(trade.symbol)
+        session = get_market_session(trade.entry_time, instrument.asset_class, trade.symbol)
+        if not session.is_tradable_session:
+            count += 1
+    return count
+
+
+def _handle_mt5_provider_unavailable(provider_name: str, exc: Exception) -> None:
+    if provider_name != "mt5":
+        return
+    print("warnings:")
+    print(f"- provider=mt5 unavailable: {exc}")
+    print("- MT5 indisponible dans cet environnement; utilisez --provider synthetic pour les tests Codex Cloud.")
+    raise SystemExit(0) from exc
 
 
 if __name__ == "__main__":

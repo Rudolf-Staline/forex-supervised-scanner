@@ -100,6 +100,17 @@ def test_reconciliation_reads_pending_orders_history_and_symbols() -> None:
     assert fake.sent_orders == []
 
 
+def test_reconciliation_handles_unavailable_mt5_calls_without_crashing() -> None:
+    report = reconcile_mt5_demo(_UnavailableMT5())
+
+    assert report.mt5_connected is False
+    assert report.reconciliation_status == "BLOCKED"
+    assert report.open_positions == 0
+    assert report.pending_orders == 0
+    assert report.foreign_positions == 0
+    assert report.duplicate_risk is False
+
+
 def _local_order(symbol: str) -> ExecutionOrder:
     request = OrderRequest(
         symbol=symbol,
@@ -177,3 +188,14 @@ class _FakeMT5:
 
     def position_close(self, ticket):
         self.closed_positions.append(ticket)
+
+
+class _UnavailableMT5:
+    def account_info(self):
+        raise RuntimeError("terminal unavailable")
+
+    def positions_get(self):
+        raise RuntimeError("terminal unavailable")
+
+    def orders_get(self):
+        raise RuntimeError("terminal unavailable")
