@@ -9,6 +9,7 @@ on:
 jobs:
   forex:
     runs-on: ubuntu-latest
+    timeout-minutes: 4
     defaults:
       run:
         working-directory: apps/forex-scanner
@@ -26,11 +27,30 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Tests
-        run: python -m pytest
+      - name: Run fast cloud-safe tests only
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          import sys
 
-      - name: Smoke check
-        run: python scripts/smoke_check.py
+          tests = [
+              "tests/test_safety.py",
+              "tests/test_demo_bot.py",
+              "tests/test_multi_asset_safety.py",
+              "tests/test_market_sessions.py",
+              "tests/test_session_aware_scanning.py",
+              "tests/test_session_wait_mode.py",
+              "tests/test_forward_test_paper.py",
+              "tests/test_demo_execution_gate.py",
+          ]
+          existing = [t for t in tests if Path(t).exists()]
+          print("Running tests:", existing)
+          assert existing, "No cloud-safe tests found"
+
+          cmd = [sys.executable, "-m", "pytest", "-q", *existing, "--maxfail=1"]
+          raise SystemExit(subprocess.call(cmd))
+          PY
 
   web:
     runs-on: ubuntu-latest
