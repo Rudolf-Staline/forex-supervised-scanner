@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from collections import Counter, defaultdict
@@ -22,12 +23,15 @@ def main() -> None:
     """Print paper fill execution-quality diagnostics."""
 
     parser = argparse.ArgumentParser(description="Report realistic paper fill quality. No orders are sent.")
-    parser.parse_args()
+    parser.add_argument("--no-export", action="store_true", help="Skip writing report artifacts under reports/.")
+    args = parser.parse_args()
     load_dotenv()
     settings = load_settings()
     database = Database(settings.database_absolute_path)
     report = build_paper_fill_report(database.load_paper_orders(), database.load_paper_blocks())
     print_paper_fill_report(report)
+    if not args.no_export:
+        export_paper_fill_report(report)
 
 
 def build_paper_fill_report(orders: list[ExecutionOrder], blocks: list[PaperBlockRecord]) -> dict[str, object]:
@@ -59,6 +63,34 @@ def print_paper_fill_report(report: dict[str, object]) -> None:
     print(f"symbols_with_worst_execution={json.dumps(report['symbols_with_worst_execution'], sort_keys=True)}")
     print(f"setups_most_affected_by_costs={json.dumps(report['setups_most_affected_by_costs'], sort_keys=True)}")
     print(f"rejection_reasons={json.dumps(report['rejection_reasons'], sort_keys=True)}")
+
+
+def export_paper_fill_report(report: dict[str, object]) -> None:
+    """Export the paper fill report to JSON and CSV artifacts."""
+
+    report_dir = PROJECT_ROOT / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = report_dir / "paper_fill_summary.json"
+    csv_path = report_dir / "paper_fill_report.csv"
+
+    summary_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+
+    with csv_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["metric", "value"],
+        )
+        writer.writeheader()
+        writer.writerow({"metric": "average_slippage", "value": report["average_slippage"]})
+        writer.writerow({"metric": "average_spread_cost", "value": report["average_spread_cost"]})
+        writer.writerow({"metric": "rejected_paper_fills", "value": report["rejected_paper_fills"]})
+        writer.writerow(
+            {"metric": "symbols_with_worst_execution", "value": json.dumps(report["symbols_with_worst_execution"], sort_keys=True)}
+        )
+        writer.writerow(
+            {"metric": "setups_most_affected_by_costs", "value": json.dumps(report["setups_most_affected_by_costs"], sort_keys=True)}
+        )
+        writer.writerow({"metric": "rejection_reasons", "value": json.dumps(report["rejection_reasons"], sort_keys=True)})
 
 
 def _worst_symbols(orders: list[ExecutionOrder]) -> list[dict[str, object]]:
