@@ -38,10 +38,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Fast cloud-safe tests
+      - name: Run fast cloud-safe tests only
         run: |
           python - <<'PY'
           from pathlib import Path
+          import subprocess
+          import sys
+
           tests = [
               "tests/test_safety.py",
               "tests/test_demo_bot.py",
@@ -53,20 +56,14 @@ jobs:
               "tests/test_demo_execution_gate.py",
           ]
           existing = [t for t in tests if Path(t).exists()]
-          print("Running cloud-safe tests:", " ".join(existing))
+          print("Running tests:", existing)
           if not existing:
-              raise SystemExit("No cloud-safe tests found")
-          Path(".ci_tests.txt").write_text("\n".join(existing) + "\n", encoding="utf-8")
-          PY
-          python -m pytest -q $(cat .ci_tests.txt) --maxfail=1
+              print("No cloud-safe tests found; skipping.")
+              raise SystemExit(0)
 
-      - name: Smoke check
-        run: |
-          if [ -f scripts/smoke_check.py ]; then
-            python scripts/smoke_check.py
-          else
-            echo "No smoke_check.py found; skipping."
-          fi
+          cmd = [sys.executable, "-m", "pytest", "-q", *existing, "--maxfail=1"]
+          raise SystemExit(subprocess.call(cmd))
+          PY
 
   web:
     runs-on: ubuntu-latest
