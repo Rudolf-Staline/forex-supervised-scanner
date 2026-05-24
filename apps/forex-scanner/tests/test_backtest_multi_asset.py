@@ -63,12 +63,16 @@ def test_build_backtest_summary_contains_required_sections() -> None:
     ]
     rows = build_backtest_rows(trades, [])
 
-    summary = build_backtest_summary(trades, rows)
+    summary = build_backtest_summary(trades, rows, off_hours_skipped=2, limitations=["demo limitation"])
 
     assert summary["warning"] == WARNING
     assert "best_markets_by_expectancy" in summary
     assert "best_sessions" in summary
     assert "setup_quality" in summary
+    assert "summary" in summary
+    assert "warnings" in summary
+    assert summary["summary"]["off_hours_skipped"] == 2
+    assert summary["warnings"] == ["demo limitation"]
     assert summary["setup_quality"]["ema50_pullback"]["occurrences"] == 1
 
 

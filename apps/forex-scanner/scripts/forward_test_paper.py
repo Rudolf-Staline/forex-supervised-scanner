@@ -39,7 +39,6 @@ from app.notifications.notifier import safety_status_for_broker  # noqa: E402
 
 FORWARD_TEST_CSV = PROJECT_ROOT / "reports" / "forward_test_paper.csv"
 FORWARD_TEST_SUMMARY_JSON = PROJECT_ROOT / "reports" / "forward_test_summary.json"
-FIXED_PROVIDER = "mt5"
 FIXED_BROKER = "paper"
 FIXED_WATCHLIST = "multi_asset_demo"
 
@@ -80,34 +79,50 @@ def main() -> None:
     """Run the paper-only forward test loop."""
 
     parser = argparse.ArgumentParser(description="Run a paper-only MT5-data forward test. No MT5 orders are sent.")
+    parser.add_argument("--provider", default="synthetic", choices=["synthetic", "mt5"])
+    parser.add_argument("--broker", default=FIXED_BROKER)
     parser.add_argument("--duration-days", type=float, default=7.0)
     parser.add_argument("--interval-seconds", type=int, default=300)
     parser.add_argument("--asset-class", default="all", choices=["forex", "commodities", "indices", "all"])
     parser.add_argument("--style", default=TradingStyle.DAY_TRADING.value, choices=[style.value for style in TradingStyle])
     parser.add_argument("--export-report", action="store_true")
     parser.add_argument("--watchlist", default=FIXED_WATCHLIST, choices=watchlist_names())
+    parser.add_argument("--skip-unhealthy-symbols", action="store_true")
+    parser.add_argument("--only-tradable-session", action="store_true")
+    parser.add_argument("--show-next-windows", action="store_true")
     parser.add_argument("--max-cycles", type=int, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     if args.watchlist != FIXED_WATCHLIST:
         raise SystemExit("forward_test_paper requires --watchlist multi_asset_demo")
+    if args.broker != FIXED_BROKER:
+        print("broker_must_be_paper=true")
+        raise SystemExit("forward_test_paper refuses non-paper broker")
     run_forward_test(
+        provider=args.provider,
         duration_days=args.duration_days,
         interval_seconds=args.interval_seconds,
         asset_class=args.asset_class,
         style=TradingStyle(args.style),
         export_report=args.export_report,
+        skip_unhealthy_symbols=args.skip_unhealthy_symbols,
+        only_tradable_session=args.only_tradable_session,
+        show_next_windows=args.show_next_windows,
         max_cycles=args.max_cycles,
     )
 
 
 def run_forward_test(
     *,
+    provider: str,
     duration_days: float,
     interval_seconds: int,
     asset_class: str,
     style: TradingStyle,
     export_report: bool,
+    skip_unhealthy_symbols: bool = False,
+    only_tradable_session: bool = False,
+    show_next_windows: bool = False,
     max_cycles: int | None = None,
 ) -> dict[str, object]:
     """Run the forward-test loop and return the final summary."""
@@ -117,17 +132,24 @@ def run_forward_test(
     if interval_seconds <= 0:
         raise SystemExit("--interval-seconds must be greater than zero")
 
-    settings, database, provider = load_demo_runtime(
-        "forward_test_paper.py",
-        provider_name=FIXED_PROVIDER,
-        broker_mode=FIXED_BROKER,
-    )
+    try:
+        settings, database, provider = load_demo_runtime(
+            "forward_test_paper.py",
+            provider_name=provider,
+            broker_mode=FIXED_BROKER,
+        )
+    except SystemExit as exc:
+        if provider == "mt5":
+            raise SystemExit(f"provider_mt5_unavailable_in_this_environment=true reason={exc}") from exc
+        raise
     base_symbols = normalize_symbols(None, FIXED_WATCHLIST, asset_class)
-    base_symbols = filter_unhealthy_symbols_if_requested(base_symbols, True, FIXED_PROVIDER)
-    print_next_session_windows(base_symbols)
+    if skip_unhealthy_symbols:
+        base_symbols = filter_unhealthy_symbols_if_requested(base_symbols, True, provider)
+    if show_next_windows:
+        print_next_session_windows(base_symbols)
     print(
-        "forward_test_paper=started "
-        f"provider={FIXED_PROVIDER} broker={FIXED_BROKER} watchlist={FIXED_WATCHLIST} "
+        "forward_test_paper=started no_trade_execution_command=true "
+        f"provider={provider} broker={FIXED_BROKER} watchlist={FIXED_WATCHLIST} "
         f"asset_class={asset_class} style={style.value} interval_seconds={interval_seconds} "
         f"duration_days={duration_days}"
     )
@@ -142,12 +164,16 @@ def run_forward_test(
                 break
             total_cycles += 1
             cycle_started = datetime.now(timezone.utc)
-            symbols = filter_tradable_session_symbols_if_requested(base_symbols, True, broker_mode=FIXED_BROKER)
+            symbols = filter_tradable_session_symbols_if_requested(
+                base_symbols,
+                only_tradable_session,
+                broker_mode=FIXED_BROKER,
+            )
             if not symbols:
                 print(f"forward_cycle={total_cycles} skipped=true reason=no_tradable_symbols_now")
             else:
                 result = service.run_cycle(style, symbols, watchlist=FIXED_WATCHLIST)
-                rows.extend(rows_from_cycle(result, database, settings))
+                rows.extend(rows_from_cycle(result, database, settings, provider_name=provider))
                 print(
                     f"forward_cycle={total_cycles} cycle_id={result.cycle_id} "
                     f"signals={result.opportunities} rows_recorded={len(rows)} orders_created={result.orders_created}"
@@ -172,7 +198,7 @@ def run_forward_test(
     return summary
 
 
-def rows_from_cycle(result: DemoBotCycleResult, database, settings) -> list[ForwardTestRow]:
+def rows_from_cycle(result: DemoBotCycleResult, database, settings, *, provider_name: str) -> list[ForwardTestRow]:
     """Build forward-test rows from the trade journal for a completed cycle."""
 
     journal_rows = [row for row in load_trade_journal() if row.get("cycle_id") == result.cycle_id]
@@ -198,7 +224,7 @@ def rows_from_cycle(result: DemoBotCycleResult, database, settings) -> list[Forw
                 asset_class=row.get("asset_class", ""),
                 logical_symbol=row.get("logical_symbol", ""),
                 mt5_symbol=row.get("mt5_symbol", ""),
-                provider=row.get("provider", FIXED_PROVIDER),
+                provider=row.get("provider", provider_name),
                 broker=FIXED_BROKER,
                 style=result.style.value,
                 session_name=row.get("session_name", ""),

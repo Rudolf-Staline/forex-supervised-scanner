@@ -61,14 +61,24 @@ class PaperFillSimulation:
     def assumptions(self) -> dict[str, str | float | bool]:
         """Return serializable execution assumptions for persisted paper orders."""
 
+        rejection_reason = self.reasons[0] if self.reasons else ""
         return {
             "paper_fill_status": self.fill_status,
+            "fill_status": self.fill_status,
             "paper_requested_entry": self.requested_entry or 0.0,
+            "requested_entry": self.requested_entry or 0.0,
             "paper_filled_entry": self.filled_entry or 0.0,
+            "filled_entry": self.filled_entry or 0.0,
             "paper_slippage_points": self.slippage_points,
+            "slippage_points": self.slippage_points,
             "paper_spread_cost": self.spread_cost,
+            "spread_cost": self.spread_cost,
             "paper_commission_estimate": self.commission_estimate,
+            "commission_estimate": self.commission_estimate,
             "paper_final_risk_reward": self.final_risk_reward or 0.0,
+            "final_risk_reward": self.final_risk_reward or 0.0,
+            "fill_rejection_reason": rejection_reason,
+            "paper_fill_rejection_reason": rejection_reason,
             "paper_partial_fill_ratio": self.partial_fill_ratio,
             "paper_realistic_fill": True,
         }

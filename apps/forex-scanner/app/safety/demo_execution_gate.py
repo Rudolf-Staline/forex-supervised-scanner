@@ -76,6 +76,7 @@ def evaluate_demo_execution_gate(context: DemoExecutionGateContext) -> DemoExecu
     broker_mode = (context.broker_mode or "").strip().lower()
     reasons: list[str] = []
 
+    _append_execution_environment_reasons(reasons)
     if broker_mode != "mt5_demo":
         reasons.append("broker=mt5_demo must be explicitly requested before MT5 demo execution")
         _append_demo_safe_mode_reasons(context.settings, reasons)
@@ -218,6 +219,18 @@ def format_demo_execution_gate_result(order_id: str, result: DemoExecutionGateRe
         f"volume={_fmt(details.get('final_volume'))} "
         f"reason={reasons}"
     )
+
+
+def _append_execution_environment_reasons(reasons: list[str]) -> None:
+    execution_mode = os.getenv("EXECUTION_MODE", "").strip().lower()
+    if execution_mode not in {"paper", "demo"}:
+        reasons.append(f"EXECUTION_MODE must be paper or demo, got {execution_mode or 'missing'}")
+    allow_live = os.getenv("ALLOW_LIVE_TRADING", "").strip().lower()
+    if allow_live != "false":
+        reasons.append(f"ALLOW_LIVE_TRADING must be false, got {allow_live or 'missing'}")
+    mt5_demo_only = os.getenv("MT5_DEMO_ONLY", "").strip().lower()
+    if mt5_demo_only != "true":
+        reasons.append(f"MT5_DEMO_ONLY must be true, got {mt5_demo_only or 'missing'}")
 
 
 def _append_demo_safe_mode_reasons(settings: AppSettings, reasons: list[str]) -> None:

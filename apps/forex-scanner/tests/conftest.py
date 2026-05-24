@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from app.config.settings import AppSettings, load_settings
+from app.mt5_availability import MT5_CLOUD_UNAVAILABLE_MESSAGE, is_mt5_available
 from app.indicators.calculations import add_indicators
 
 
@@ -54,3 +55,23 @@ def make_ohlcv(rows: int = 260, trend: float = 0.00035, start: float = 1.0) -> p
 
 def enriched_trend_frame(rows: int = 260, trend: float = 0.00035) -> pd.DataFrame:
     return add_indicators(make_ohlcv(rows=rows, trend=trend))
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line("markers", "mt5_required: requires local MT5 terminal access")
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if is_mt5_available():
+        return
+
+    skip_mt5 = pytest.mark.skip(reason=MT5_CLOUD_UNAVAILABLE_MESSAGE)
+    for item in items:
+        if "mt5_required" in item.keywords:
+            item.add_marker(skip_mt5)
+
+
+@pytest.fixture
+def skip_if_mt5_unavailable() -> None:
+    if not is_mt5_available():
+        pytest.skip(MT5_CLOUD_UNAVAILABLE_MESSAGE)
