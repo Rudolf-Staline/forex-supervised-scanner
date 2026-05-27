@@ -95,6 +95,30 @@ def test_symbol_failures_are_handled(monkeypatch):
     assert report.final_status == "BLOCKED"
 
 
+def test_deriv_symbol_aliases_resolution(monkeypatch):
+    class AliasDummyMT5(DummyMT5):
+        def symbol_info(self, symbol: str):
+            # Only acknowledge specific aliases
+            if symbol in {"US SP 500", "US Oil", "UK Brent Oil", "Wall Street 30"}:
+                return SimpleNamespace(name=symbol)
+            return None
+
+        def symbol_info_tick(self, symbol: str):
+            if symbol in {"US SP 500", "US Oil", "UK Brent Oil", "Wall Street 30"}:
+                return SimpleNamespace(bid=1.0, ask=1.1)
+            return None
+
+    mt5 = AliasDummyMT5(demo=True)
+    monkeypatch.setattr(readonly, "reconcile_mt5_demo", lambda *_args, **_kwargs: SimpleNamespace(reconciliation_status="OK", open_positions=0, foreign_positions=0))
+
+    # Passing symbols that have special aliases
+    symbols_to_test = ["US500", "WTI/OIL", "BRENT/OIL", "US30"]
+    report = readonly.run_validation(mt5, watchlist="multi_asset_demo", symbols=symbols_to_test, show_next_windows=False)
+
+    assert set(report.symbols_ok) == set(symbols_to_test)
+    assert not report.symbols_failed
+
+
 def test_reconciliation_called_readonly(monkeypatch):
     mt5 = DummyMT5(demo=True)
     called = {"ok": False, "account": None}

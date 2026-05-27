@@ -211,8 +211,23 @@ class DemoBotService:
             reasons.append(f"status {opportunity.status.value} disabled by AUTO_BOT_ALLOWED_STATUSES")
         if score is None:
             reasons.append("missing final_score")
-        elif score < self.config.min_score:
-            reasons.append(f"score {score:.1f} below minimum {self.config.min_score:.1f}")
+        else:
+            # Respect adaptive threshold if it was successfully applied by the pipeline.
+            is_adaptive = getattr(opportunity, "adaptive_threshold_enabled", False)
+            mode_str = getattr(self.settings, "adaptive_thresholds", None).mode if getattr(self.settings, "adaptive_thresholds", None) else "report_only"
+            can_use_adaptive = is_adaptive and mode_str == "scanner_effective"
+
+            effective_min = getattr(opportunity, "effective_min_score", self.config.min_score)
+            if effective_min is None:
+                effective_min = self.config.min_score
+
+            # The demo bot config itself has a hard minimum. We only apply the adaptive minimum if adaptive logic is formally engaged.
+            strict_min = max(self.config.min_score, effective_min) if can_use_adaptive else self.config.min_score
+
+            if score < strict_min:
+                label = "adaptive threshold" if can_use_adaptive else "minimum"
+                reasons.append(f"score {score:.1f} below {label} {strict_min:.1f}")
+
         if opportunity.risk_reward is None or opportunity.risk_reward < self.config.min_rr:
             reasons.append(f"risk/reward {opportunity.risk_reward or 0.0:.2f} below minimum {self.config.min_rr:.2f}")
         if _data_quality_score(opportunity) < self.settings.portfolio_risk.min_data_quality_for_entry:
