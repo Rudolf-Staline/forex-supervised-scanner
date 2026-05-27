@@ -37,6 +37,7 @@ from app.risk.engine import RiskEngine
 from app.scoring.engine import ScoringEngine, market_session
 from app.setups.detector import detect_setups
 from app.storage.database import Database
+from app.adaptive_thresholds.provider import AdaptiveThresholdProvider
 
 LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ class ScannerService:
         self.regime_detector = MarketRegimeDetector()
         self.risk_engine = RiskEngine(settings)
         self.scoring_engine = ScoringEngine(settings)
+        self.adaptive_thresholds = AdaptiveThresholdProvider(settings)
 
     def scan(self, style: TradingStyle, symbols: list[str], timestamp: datetime | None = None) -> ScanReport:
         """Scan a symbol universe and return ranked opportunities plus recoverable errors."""
@@ -144,7 +146,11 @@ class ScannerService:
                 timestamp=timestamp,
                 empirical_score=empirical,
             )
-            minimum_score = self.scoring_engine.minimum_score(raw.family)
+
+            adaptive_res = self.adaptive_thresholds.get_threshold(symbol, style)
+            effective_min_score = adaptive_res.effective_min_score if self.adaptive_thresholds.enabled and self.adaptive_thresholds.mode == "scanner_effective" else adaptive_res.base_min_score
+
+            minimum_score = effective_min_score
             minimum_rr = self.settings.styles[style].min_rr
             gates = build_gate_breakdown(
                 setup=raw,
@@ -249,11 +255,10 @@ class ScannerService:
                 )
                 continue
 
-            opportunities.append(
-                _opportunity_from_candidate(
-                    timestamp=timestamp,
-                    symbol=symbol,
-                    style=style,
+            opportunity = _opportunity_from_candidate(
+                timestamp=timestamp,
+                symbol=symbol,
+                style=style,
                     setup_family=raw.family,
                     setup_subtype=raw.subtype,
                     regime=raw.regime,
@@ -296,10 +301,17 @@ class ScannerService:
                     trigger_regime=trigger_regime.regime,
                     data_quality=data_quality,
                     detected_patterns=raw.detected_patterns,
-                    pattern_score=raw.pattern_score,
-                    pattern_explanations=raw.pattern_explanations,
-                )
+                pattern_score=raw.pattern_score,
+                pattern_explanations=raw.pattern_explanations,
             )
+            opportunity.adaptive_threshold_enabled = self.adaptive_thresholds.enabled
+            opportunity.base_min_score = adaptive_res.base_min_score
+            opportunity.adaptive_min_score = adaptive_res.recommended_min_score
+            opportunity.effective_min_score = adaptive_res.effective_min_score
+            opportunity.adaptive_threshold_confidence = adaptive_res.confidence_level
+            opportunity.adaptive_threshold_reason = adaptive_res.reason_summary
+
+            opportunities.append(opportunity)
 
         if opportunities or rejected_candidates:
             return opportunities + rejected_candidates
