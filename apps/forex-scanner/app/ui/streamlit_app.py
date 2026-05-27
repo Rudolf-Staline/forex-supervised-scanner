@@ -9,6 +9,8 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
+import json
+import subprocess
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -57,7 +59,7 @@ def main() -> None:
     with monitor_tabs[2]:
         _mt5_data_status_page(settings)
 
-    tabs = st.tabs(["Scanner", "Opportunités", "Paper Trading", "Bot Demo", "Backtest", "Journal", "Rapports / Audit"])
+    tabs = st.tabs(["Scanner", "Opportunités", "Paper Trading", "Bot Demo", "Backtest", "Journal", "Rapports / Audit", "Configuration"])
     with tabs[0]:
         _scanner_page(settings, provider, database)
     with tabs[1]:
@@ -72,6 +74,8 @@ def main() -> None:
         _journal_page(database)
     with tabs[6]:
         _reports_audit_page(settings, database)
+    with tabs[7]:
+        _configuration_page(settings)
 
 
 def _database(settings: AppSettings) -> Database:
@@ -1289,6 +1293,187 @@ def _orders_dataframe(orders: list[ExecutionOrder], *, empty_message: str) -> No
     ]
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
+
+def _configuration_page(settings: AppSettings) -> None:
+    st.subheader("Configuration")
+    st.caption("Affichez et modifiez les paramètres locaux (limité aux valeurs sûres en paper trading).")
+
+    # Security check to determine overall status
+    allow_live_trading = str(os.getenv("ALLOW_LIVE_TRADING", "false")).strip().lower() == "true"
+    execution_mode_env = str(os.getenv("EXECUTION_MODE", "paper")).strip().lower()
+    broker_mode_env = str(os.getenv("BROKER_MODE", "paper")).strip().lower()
+
+    status_badge = "SAFE"
+    status_color = "green"
+    if allow_live_trading:
+        status_badge = "DANGEROUS"
+        status_color = "red"
+    elif execution_mode_env != "paper" or broker_mode_env != "paper":
+        status_badge = "WARN"
+        status_color = "orange"
+
+    st.markdown(f"**Statut de Sécurité:** :{status_color}[{status_badge}]")
+    if status_badge == "DANGEROUS":
+        st.error("ALLOW_LIVE_TRADING est activé. Actions sensibles bloquées depuis l'UI.")
+        return
+
+    sec_col1, sec_col2 = st.columns(2)
+    with sec_col1:
+        st.markdown("### 1. Mode Général")
+        st.write(f"**Provider:** {settings.provider.name}")
+        st.write(f"**Execution Mode:** {settings.execution.mode}")
+        st.write(f"**Broker Mode:** {settings.broker.provider}")
+        st.write(f"**Trading Styles:** {', '.join([s.value for s in settings.styles.keys()])}")
+        st.write(f"**Symbols actifs:** {len(settings.symbols)}")
+        with st.expander("Voir les symboles"):
+            st.write(", ".join(settings.symbols))
+
+    with sec_col2:
+        st.markdown("### 2. Variables de Sécurité (.env)")
+        st.caption("Ces variables sont en lecture seule pour éviter tout risque de live trading accidentel.")
+        env_vars = {
+            "EXECUTION_MODE": os.getenv("EXECUTION_MODE", "Non défini"),
+            "BROKER_MODE": os.getenv("BROKER_MODE", "Non défini"),
+            "ALLOW_LIVE_TRADING": os.getenv("ALLOW_LIVE_TRADING", "Non défini"),
+            "MT5_DEMO_ONLY": os.getenv("MT5_DEMO_ONLY", "Non défini"),
+            "ENABLE_DEMO_EXECUTION": os.getenv("ENABLE_DEMO_EXECUTION", "Non défini"),
+            "AUTO_BOT_ENABLED": os.getenv("AUTO_BOT_ENABLED", "Non défini"),
+            "ALLOW_MULTI_ASSET_DEMO_TRADING": os.getenv("ALLOW_MULTI_ASSET_DEMO_TRADING", "Non défini"),
+            "NOTIFICATIONS_ENABLED": os.getenv("NOTIFICATIONS_ENABLED", "Non défini"),
+        }
+        st.table(pd.DataFrame(list(env_vars.items()), columns=["Variable", "Valeur"]))
+
+    st.markdown("---")
+    st.markdown("### 3. Adaptive Thresholds")
+    adaptive = getattr(settings, "adaptive_thresholds", None)
+
+    with st.form("adaptive_thresholds_form"):
+        en_val = getattr(adaptive, "enabled", False) if adaptive else False
+        mode_val = getattr(adaptive, "mode", "report_only") if adaptive else "report_only"
+
+        c1, c2, c3 = st.columns(3)
+        en_input = c1.checkbox("Activer Adaptive Thresholds", value=en_val)
+        mode_input = c2.selectbox("Mode", ["report_only", "scanner_effective"], index=0 if mode_val=="report_only" else 1)
+        min_samp = c3.number_input("Min Sample Size", value=int(getattr(adaptive, "min_sample_size", 30) if adaptive else 30), min_value=1)
+
+        c4, c5, c6, c7 = st.columns(4)
+        hf_fx = c4.number_input("Hard Floor Forex", value=float(getattr(adaptive, "hard_floor_forex", 70.0) if adaptive else 70.0))
+        hf_com = c5.number_input("Hard Floor Commodities", value=float(getattr(adaptive, "hard_floor_commodities", 78.0) if adaptive else 78.0))
+        hf_ind = c6.number_input("Hard Floor Indices", value=float(getattr(adaptive, "hard_floor_indices", 80.0) if adaptive else 80.0))
+        hcap = c7.number_input("Hard Cap", value=float(getattr(adaptive, "hard_cap", 92.0) if adaptive else 92.0))
+
+        max_chg = st.number_input("Max Daily Change", value=float(getattr(adaptive, "max_daily_change", 2.0) if adaptive else 2.0))
+
+        save_btn = st.form_submit_button("Sauvegarder configuration locale")
+        if save_btn:
+            try:
+                # Update the settings object safely
+                new_settings = settings.model_copy(deep=True)
+                new_adaptive = {
+                    "enabled": en_input,
+                    "mode": mode_input,
+                    "min_sample_size": min_samp,
+                    "hard_floor_forex": hf_fx,
+                    "hard_floor_commodities": hf_com,
+                    "hard_floor_indices": hf_ind,
+                    "hard_cap": hcap,
+                    "max_daily_change": max_chg,
+                    "persist_latest_report": True
+                }
+                # Model validation will happen here
+                from app.config.settings import AdaptiveThresholdSettings
+                new_settings.adaptive_thresholds = AdaptiveThresholdSettings(**new_adaptive)
+                save_settings(new_settings)
+                st.success("Configuration sauvegardée avec succès.")
+            except Exception as exc:
+                st.error(f"Erreur de validation: {exc}")
+
+    c_report, c_load_report = st.columns(2)
+    with c_report:
+        style_report = st.selectbox("Style pour le rapport Adaptive", [s.value for s in TradingStyle])
+        if st.button("Générer le rapport adaptive thresholds"):
+            with st.spinner("Génération..."):
+                try:
+                    result = subprocess.run(
+                        ["python", "scripts/adaptive_thresholds_report.py", "--style", style_report, "--export-json"],
+                        capture_output=True, text=True, check=True
+                    )
+                    st.success("Rapport généré.")
+                    st.code(result.stdout)
+                except subprocess.CalledProcessError as exc:
+                    st.error(f"Erreur script: {exc.stderr}")
+
+    with c_load_report:
+        report_path = Path("reports/adaptive_thresholds_summary.json")
+        if report_path.exists():
+            st.info("Un rapport récent existe.")
+            with st.expander("Voir les seuils recommandés par symbole"):
+                try:
+                    with open(report_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        thresholds = data.get("thresholds_by_symbol", {})
+                        if thresholds:
+                            df = pd.DataFrame(list(thresholds.values()))
+                            st.dataframe(df[["symbol", "style", "base_min_score", "recommended_min_score", "effective_min_score", "reason_summary"]])
+                except Exception as e:
+                    st.error(f"Erreur de lecture: {e}")
+
+    st.markdown("---")
+    st.markdown("### 4. Rapports (Read-Only)")
+    st.caption("Lancez les scripts de diagnostic sans modifier l'état d'exécution.")
+
+    report_scripts = [
+        ("safety_env_doctor.py", "Safety Env Doctor"),
+        ("config_profile_validator.py", "Config Validator"),
+        ("adaptive_thresholds_report.py --style day_trading", "Adaptive Thresholds"),
+        ("report_index.py", "Report Index"),
+        ("demo_readiness_report.py", "Demo Readiness"),
+        ("signal_quality_report.py", "Signal Quality"),
+        ("risk_exposure_report.py", "Risk Exposure"),
+        ("symbol_health_report.py", "Symbol Health"),
+    ]
+
+    r_cols = st.columns(3)
+    for i, (script, label) in enumerate(report_scripts):
+        with r_cols[i % 3]:
+            if st.button(label, key=f"run_{label.replace(' ', '_')}"):
+                with st.spinner(f"Exécution de {script}..."):
+                    try:
+                        cmd = ["python"] + [f"scripts/{script.split()[0]}"] + script.split()[1:]
+                        result = subprocess.run(
+                            cmd,
+                            capture_output=True, text=True, check=True
+                        )
+                        st.success(f"{script} complété.")
+                        st.code(result.stdout)
+                    except subprocess.CalledProcessError as exc:
+                        st.error(f"Erreur dans {script}: {exc.stderr}")
+
+    st.markdown("---")
+    st.markdown("### 5. Export / Import Configuration")
+    exp_col, imp_col = st.columns(2)
+    with exp_col:
+        st.download_button(
+            label="Exporter config JSON",
+            data=settings.model_dump_json(indent=2),
+            file_name="settings_export.json",
+            mime="application/json"
+        )
+    with imp_col:
+        uploaded_file = st.file_uploader("Importer config JSON", type="json")
+        if uploaded_file is not None:
+            if st.button("Valider et appliquer"):
+                try:
+                    payload = json.load(uploaded_file)
+                    new_settings = AppSettings.model_validate(payload)
+                    # Block attempts to override read-only UI states or live execution via UI upload
+                    if new_settings.broker.live_enabled or new_settings.execution_capabilities.broker_live_enabled:
+                        st.error("L'importation de configuration live est interdite via l'UI.")
+                    else:
+                        save_settings(new_settings)
+                        st.success("Configuration importée avec succès.")
+                except Exception as e:
+                    st.error(f"Configuration invalide : {e}")
 
 def _events_dataframe(events: list[TradeEvent]) -> None:
     if not events:

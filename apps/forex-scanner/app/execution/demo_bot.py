@@ -221,8 +221,9 @@ class DemoBotService:
             if effective_min is None:
                 effective_min = self.config.min_score
 
-            # The demo bot config itself has a hard minimum. We only apply the adaptive minimum if adaptive logic is formally engaged.
-            strict_min = max(self.config.min_score, effective_min) if can_use_adaptive else self.config.min_score
+            # We apply the adaptive minimum if adaptive logic is formally engaged,
+            # trusting the engine to enforce hard_floor. Otherwise, use static config min_score.
+            strict_min = effective_min if can_use_adaptive else self.config.min_score
 
             if score < strict_min:
                 label = "adaptive threshold" if can_use_adaptive else "minimum"
