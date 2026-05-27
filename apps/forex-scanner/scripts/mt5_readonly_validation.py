@@ -45,6 +45,15 @@ class ValidationReport:
     message: str = ""
 
 
+def _optional_float(value: object) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate MT5 demo access without placing any order.")
     parser.add_argument("--watchlist", default="multi_asset_demo")
@@ -170,7 +179,35 @@ def _symbols_to_check(watchlist: str, symbols: list[str]) -> list[str]:
 
 
 def _resolve_symbol_name(mt5: object, logical_symbol: str) -> str | None:
-    for candidate in (logical_symbol, logical_symbol.replace("/", "")):
+    aliases = {
+        "EUR/USD": "EURUSD",
+        "GBP/USD": "GBPUSD",
+        "USD/CHF": "USDCHF",
+        "USD/JPY": "USDJPY",
+        "AUD/USD": "AUDUSD",
+        "USD/CAD": "USDCAD",
+        "NZD/USD": "NZDUSD",
+        "XAU/USD": "XAUUSD",
+        "XAG/USD": "XAGUSD",
+        "WTI/OIL": "US Oil",
+        "BRENT/OIL": "UK Brent Oil",
+        "US500": "US SP 500",
+        "US30": "Wall Street 30",
+        "NAS100": "US Tech 100",
+        "GER40": "Germany 40",
+        "UK100": "UK 100",
+        "FRA40": "France 40",
+    }
+
+    candidates = [logical_symbol]
+    if logical_symbol in aliases:
+        candidates.append(aliases[logical_symbol])
+
+    no_slash = logical_symbol.replace("/", "")
+    if no_slash not in candidates:
+        candidates.append(no_slash)
+
+    for candidate in candidates:
         if _safe_mt5_call(mt5, "symbol_info", candidate) is not None:
             return candidate
     return None
@@ -233,12 +270,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-def _optional_float(value: object) -> float | None:
-    try:
-        if value is None:
-            return None
-        return float(value)
-    except (TypeError, ValueError):
-        return None
