@@ -166,7 +166,7 @@ def close_paper_order_manually(
 def _request_from_opportunity(opportunity: Opportunity, settings: AppSettings) -> OrderRequest:
     if opportunity.entry is None or opportunity.stop_loss is None or opportunity.take_profit is None:
         raise ValueError("approved opportunity is missing executable entry, stop, or target")
-    return OrderRequest(
+    req = OrderRequest(
         symbol=opportunity.symbol,
         style=opportunity.style,
         setup_family=opportunity.setup_family,
@@ -191,6 +191,8 @@ def _request_from_opportunity(opportunity: Opportunity, settings: AppSettings) -
         data_quality_score=opportunity.data_quality.score if opportunity.data_quality else None,
         data_warning=opportunity.data_warning,
     )
+    req.extra_context["source_opportunity"] = opportunity
+    return req
 
 
 def _closed_orders(orders: list[ExecutionOrder]) -> list[ExecutionOrder]:

@@ -491,5 +491,16 @@
     "require_data_quality": true,
     "block_invalidated_setups": true,
     "allow_off_hours": true
+  },
+  "adaptive_thresholds": {
+    "enabled": false,
+    "mode": "report_only",
+    "min_sample_size": 30,
+    "max_daily_change": 2.0,
+    "hard_floor_forex": 70.0,
+    "hard_floor_commodities": 78.0,
+    "hard_floor_indices": 80.0,
+    "hard_cap": 92.0,
+    "persist_latest_report": true
   }
 }

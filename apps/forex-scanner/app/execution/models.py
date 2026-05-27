@@ -261,6 +261,9 @@ class OrderRequest(BaseModel):
     data_quality_score: float | None = Field(default=None, ge=0.0, le=100.0)
     data_warning: str | None = None
 
+    # Extra dict to hold transient data like adaptive thresholds without polluting BaseModel
+    extra_context: dict[str, object] = Field(default_factory=dict, exclude=True)
+
     @model_validator(mode="after")
     def ensure_executable_direction_and_levels(self) -> "OrderRequest":
         if self.direction not in {DirectionBias.LONG, DirectionBias.SHORT}:

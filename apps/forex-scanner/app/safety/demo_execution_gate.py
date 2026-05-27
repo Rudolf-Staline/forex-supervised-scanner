@@ -123,8 +123,23 @@ def evaluate_demo_execution_gate(context: DemoExecutionGateContext) -> DemoExecu
     score = request.final_score
     if score is None:
         reasons.append("missing final_score")
-    elif score < instrument.min_score:
-        reasons.append(f"score {score:.1f} below asset_class threshold {instrument.min_score:.1f}")
+    else:
+        opp = request.extra_context.get("source_opportunity")
+        effective_min = getattr(opp, "effective_min_score", instrument.min_score) if opp else instrument.min_score
+        if effective_min is None:
+             effective_min = instrument.min_score
+
+        # Only use the adaptive score if the mode is formally "scanner_effective". If the enabled flag is false, or mode is report_only, we must enforce the static min_score
+        mode_str = getattr(context.settings, "adaptive_thresholds", None).mode if getattr(context.settings, "adaptive_thresholds", None) else "report_only"
+        is_adaptive = getattr(opp, "adaptive_threshold_enabled", False) if opp else False
+
+        # Safety: We require both the object flag and the global setting mode to be strictly 'scanner_effective' to actually lower thresholds.
+        can_use_adaptive = is_adaptive and mode_str == "scanner_effective"
+
+        if not can_use_adaptive and score < instrument.min_score:
+            reasons.append(f"score {score:.1f} below asset_class threshold {instrument.min_score:.1f}")
+        elif can_use_adaptive and score < effective_min:
+            reasons.append(f"score {score:.1f} below adaptive threshold {effective_min:.1f}")
 
     risk_reward = _risk_reward(request.entry_price, request.stop_loss, request.take_profit, request.direction)
     if risk_reward is None:

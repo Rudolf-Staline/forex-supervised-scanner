@@ -63,6 +63,12 @@ def append_cycle_signal_journal(
                     "tp3": rejected.tp3,
                     "spread_atr": rejected.spread_atr,
                     "scan_only_reason": "; ".join([r for r in rejected.rejection_reasons if "scan_only" in r.lower()]) or None,
+                    "adaptive_threshold_enabled": rejected.opportunity.adaptive_threshold_enabled if hasattr(rejected, "opportunity") and rejected.opportunity else None,
+                    "base_min_score": rejected.opportunity.base_min_score if hasattr(rejected, "opportunity") and rejected.opportunity else None,
+                    "adaptive_min_score": rejected.opportunity.adaptive_min_score if hasattr(rejected, "opportunity") and rejected.opportunity else None,
+                    "effective_min_score": rejected.opportunity.effective_min_score if hasattr(rejected, "opportunity") and rejected.opportunity else None,
+                    "adaptive_threshold_confidence": rejected.opportunity.adaptive_threshold_confidence if hasattr(rejected, "opportunity") and rejected.opportunity else None,
+                    "adaptive_threshold_reason": rejected.opportunity.adaptive_threshold_reason if hasattr(rejected, "opportunity") and rejected.opportunity else None,
                 }
             )
         if created is not None:
@@ -78,6 +84,18 @@ def append_cycle_signal_journal(
                     "spread_atr": _safe_spread_atr(created),
                 }
             )
+            # Fetch adaptive info from source opportunity if available
+            opp = created.request.extra_context.get("source_opportunity")
+
+            if opp:
+                row.update({
+                    "adaptive_threshold_enabled": getattr(opp, "adaptive_threshold_enabled", None),
+                    "base_min_score": getattr(opp, "base_min_score", None),
+                    "adaptive_min_score": getattr(opp, "adaptive_min_score", None),
+                    "effective_min_score": getattr(opp, "effective_min_score", None),
+                    "adaptive_threshold_confidence": getattr(opp, "adaptive_threshold_confidence", None),
+                    "adaptive_threshold_reason": getattr(opp, "adaptive_threshold_reason", None),
+                })
         rows.append(row)
 
     with output_path.open("a", encoding="utf-8") as handle:

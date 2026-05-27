@@ -336,6 +336,14 @@ class Opportunity(BaseModel):
     entry_regime: MarketRegime | None = None
     trigger_regime: MarketRegime | None = None
     data_quality: DataQualityDiagnostic | None = None
+
+    adaptive_threshold_enabled: bool = False
+    base_min_score: float | None = None
+    adaptive_min_score: float | None = None
+    effective_min_score: float | None = None
+    adaptive_threshold_confidence: str | None = None
+    adaptive_threshold_reason: str | None = None
+
     outcome: TradeOutcomeLabel | None = None
     tp1_hit: bool | None = None
     tp2_hit: bool | None = None

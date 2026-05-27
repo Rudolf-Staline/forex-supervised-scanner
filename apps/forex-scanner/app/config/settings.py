@@ -657,6 +657,26 @@ class RetentionArchiveSettings(BaseModel):
         return self
 
 
+class AdaptiveThresholdSettings(BaseModel):
+    """Configuration for dynamic minimum score adjustments based on history and style."""
+
+    enabled: bool = False
+    mode: Literal["report_only", "scanner_effective"] = "report_only"
+    min_sample_size: int = Field(default=30, ge=1)
+    max_daily_change: float = Field(default=2.0, ge=0.0)
+    hard_floor_forex: float = Field(default=70.0, ge=0.0)
+    hard_floor_commodities: float = Field(default=78.0, ge=0.0)
+    hard_floor_indices: float = Field(default=80.0, ge=0.0)
+    hard_cap: float = Field(default=92.0, ge=0.0, le=100.0)
+    persist_latest_report: bool = True
+
+    @model_validator(mode="after")
+    def validate_adaptive_floors(self) -> "AdaptiveThresholdSettings":
+        if self.hard_floor_forex > self.hard_cap or self.hard_floor_commodities > self.hard_cap or self.hard_floor_indices > self.hard_cap:
+            raise ValueError("Adaptive hard floors cannot exceed hard cap")
+        return self
+
+
 class BackupRecoverySettings(BaseModel):
     """Local backup, restore, and service-continuity safety behavior."""
 
@@ -773,6 +793,7 @@ class AppSettings(BaseModel):
     setups: SetupSettings
     risk: RiskSettings
     confidence_thresholds: ConfidenceThresholds
+    adaptive_thresholds: AdaptiveThresholdSettings = Field(default_factory=AdaptiveThresholdSettings)
 
     @field_validator("symbols")
     @classmethod
