@@ -91,9 +91,9 @@ def build_plan(args: argparse.Namespace) -> list[tuple[str, list[str], bool, boo
             ),
             (
                 "multi_asset_signal_report",
-                ["python", "scripts/multi_asset_signal_report.py", "--provider", args.provider, "--watchlist", args.watchlist],
+                ["python", "scripts/multi_asset_signal_report.py", "--watchlist", args.watchlist],
                 has("scripts/multi_asset_signal_report.py"),
-                args.provider == "mt5",
+                False,
             ),
         ])
 

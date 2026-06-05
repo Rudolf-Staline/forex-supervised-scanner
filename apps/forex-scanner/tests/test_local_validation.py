@@ -15,6 +15,15 @@ def test_quick_never_contains_live_order_command() -> None:
     assert "mt5_tiny_demo_order" not in flattened
 
 
+def test_quick_multi_asset_report_uses_supported_arguments() -> None:
+    class A: quick=True; full=False; skip_tests=False; skip_scripts=False; provider='synthetic'; watchlist='multi_asset_demo'
+    plan = local_validation.build_plan(A())
+    _, command, _, allow_mt5_warn = next(item for item in plan if item[0] == "multi_asset_signal_report")
+    assert "--provider" not in command
+    assert command == ["python", "scripts/multi_asset_signal_report.py", "--watchlist", "multi_asset_demo"]
+    assert allow_mt5_warn is False
+
+
 def test_safety_env_enforced() -> None:
     assert local_validation.SAFETY_ENV["ALLOW_LIVE_TRADING"] == "false"
     assert local_validation.SAFETY_ENV["EXECUTION_MODE"] == "paper"
