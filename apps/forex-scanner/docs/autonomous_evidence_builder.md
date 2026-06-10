@@ -39,7 +39,7 @@ From `apps/forex-scanner`:
 python scripts/autonomous_evidence_builder.py --mode dry-run --export-json --export-txt
 python scripts/autonomous_evidence_builder.py --mode read-only --include-readiness --export-json --export-txt
 python scripts/autonomous_readiness_report.py --build-evidence-first --evidence-mode read-only --export-json --export-txt
-python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --dry-run --build-evidence-first --evidence-mode read-only --readiness-only --export-json --export-txt
+python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --dry-run --build-evidence-first --evidence-mode read-only --readiness-only --plan-recovery-on-block --export-json --export-txt
 ```
 
 The CLI prints the final evidence status, task counts, report paths, whether readiness was re-evaluated, and a safety warning.

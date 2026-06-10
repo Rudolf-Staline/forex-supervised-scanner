@@ -331,3 +331,70 @@ def test_cli_help_documents_canonical_options_and_legacy_aliases() -> None:
         "--no-sleep",
     ]:
         assert option in help_text
+
+def test_supervisor_never_bypasses_readiness_gate_if_not_dry_run(settings, database, monkeypatch: pytest.MonkeyPatch) -> None:
+    def blocking_readiness(*args, **kwargs) -> AutonomousReadinessReport:
+        now = datetime.now(timezone.utc)
+        return AutonomousReadinessReport(
+            generated_at=now,
+            final_status=AutonomousReadinessFinalStatus.BLOCKED_BY_SAFETY,
+            ready=False,
+            dry_run_allowed=False,
+            paper_run_allowed=False,
+            blocking_reasons=["central safety mode is degraded"],
+            checks=[],
+        )
+    monkeypatch.setattr(autonomous_module, "build_readiness_report", blocking_readiness)
+
+    result = AutonomousSupervisorService(settings, object(), database).run_loop(
+        enabled_config(max_cycles=3, dry_run=False, skip_readiness_gate=False)
+    )
+
+    assert result.final_status == AutonomousSupervisorFinalStatus.BLOCKED_BY_READINESS
+    assert result.cycle_count == 0
+    assert result.paper_orders_created == 0
+    assert FakeDemoBotService.calls == []
+
+def test_evidence_failure_blocks_non_dry_run_paper_autonomy(settings, database, monkeypatch: pytest.MonkeyPatch) -> None:
+    def block_readiness(*args, **kwargs):
+        now = datetime.now(timezone.utc)
+        return AutonomousReadinessReport(
+            generated_at=now,
+            final_status=AutonomousReadinessFinalStatus.BLOCKED_BY_NO_EVIDENCE,
+            ready=False,
+            dry_run_allowed=False,
+            paper_run_allowed=False,
+            blocking_reasons=["evidence blocked"],
+            checks=[],
+        )
+    monkeypatch.setattr(autonomous_module, "build_readiness_report", block_readiness)
+
+    result = AutonomousSupervisorService(settings, object(), database).run_loop(
+        enabled_config(dry_run=False, skip_readiness_gate=False, max_cycles=1)
+    )
+
+    assert result.final_status == AutonomousSupervisorFinalStatus.BLOCKED_BY_READINESS
+    assert result.paper_orders_created == 0
+
+def test_dry_run_remains_diagnostic_only(settings, database, monkeypatch: pytest.MonkeyPatch) -> None:
+    result = AutonomousSupervisorService(settings, object(), database).run_loop(
+        enabled_config(dry_run=True, skip_readiness_gate=True, max_cycles=1)
+    )
+
+    assert result.final_status == AutonomousSupervisorFinalStatus.DRY_RUN
+    assert result.paper_orders_created == 0
+    assert result.dry_run is True
+
+def test_supervisor_does_not_contain_infinite_loop_or_hidden_daemon() -> None:
+    source = Path(autonomous_module.__file__).read_text(encoding="utf-8")
+    assert "while True:" not in source
+    assert "daemon=True" not in source
+    assert "threading.Thread" not in source
+    assert "multiprocessing.Process" not in source
+
+def test_supervisor_does_not_print_credentials() -> None:
+    source = Path(autonomous_module.__file__).read_text(encoding="utf-8")
+    lower_source = source.lower()
+    assert "print(password)" not in lower_source
+    assert "print(login)" not in lower_source
+    assert "print(secret)" not in lower_source
