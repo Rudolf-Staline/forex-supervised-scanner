@@ -17,6 +17,7 @@ from app.execution.autonomous_supervisor import (
 )
 from app.execution.demo_bot import DemoBotCycleResult, DemoBotDecision
 from app.execution.operations import OperatorControlState
+from app.execution.autonomous_readiness import AutonomousReadinessFinalStatus, AutonomousReadinessReport
 from app.risk.daily_limits import DailyRiskSummary
 from app.storage.database import Database
 
@@ -84,6 +85,19 @@ def reset_fake(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeDemoBotService.orders_created = 1
     FakeDemoBotService.fail = False
     monkeypatch.setattr(autonomous_module, "DemoBotService", FakeDemoBotService)
+
+    def fake_readiness(*args, **kwargs) -> AutonomousReadinessReport:
+        now = datetime.now(timezone.utc)
+        return AutonomousReadinessReport(
+            generated_at=now,
+            final_status=AutonomousReadinessFinalStatus.READY,
+            ready=True,
+            dry_run_allowed=True,
+            paper_run_allowed=True,
+            safety_flags={"live_execution_allowed": False},
+        )
+
+    monkeypatch.setattr(autonomous_module, "build_readiness_report", fake_readiness)
 
 
 def enabled_config(**overrides: object) -> AutonomousSupervisorConfig:

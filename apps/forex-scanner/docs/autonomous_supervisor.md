@@ -154,3 +154,18 @@ The supervisor stops when any configured bound or safety condition is reached:
 ## Explicit live-trading warning
 
 Autonomous Supervisor v0 does **not** authorize live trading. It does not add broker-live execution, cannot enable `ALLOW_LIVE_TRADING`, does not submit broker orders, and must not be used as evidence that a real-money broker account is approved for automated execution.
+
+## Autonomous Readiness Gate
+
+Before cycles start, the supervisor now builds an Autonomous Readiness Gate report. The gate checks central paper/demo safety, operator controls, paper risk, recent session/data/failure-diagnostics evidence, optional anomaly and mapping audits, and report freshness.
+
+Non-dry-run paper cycles require `READY`. Dry-run diagnostics may continue with `WARN_READY` when conservative defaults allow it. Blocking statuses stop the supervisor before any cycle is attempted and the exported supervisor JSON embeds the readiness report.
+
+Useful commands:
+
+```bash
+python scripts/autonomous_readiness_report.py --export-json --export-txt
+python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --dry-run --readiness-only --export-readiness-json --export-readiness-txt
+```
+
+`--skip-readiness-gate` is diagnostic-only and only accepted in dry-run mode; it cannot enable non-dry-run paper cycles while readiness is blocking. See [`autonomous_readiness_gate.md`](autonomous_readiness_gate.md).
