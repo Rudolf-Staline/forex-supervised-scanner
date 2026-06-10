@@ -90,6 +90,22 @@ def build_plan(args: argparse.Namespace) -> list[tuple[str, list[str], bool, boo
                 False,
             ),
             (
+                "autonomous_supervisor_dry_run",
+                [
+                    "python",
+                    "scripts/run_autonomous_supervisor.py",
+                    "--provider",
+                    "synthetic",
+                    "--once",
+                    "--symbols",
+                    "EUR/USD",
+                    "--dry-run",
+                    "--no-sleep",
+                ],
+                has("scripts/run_autonomous_supervisor.py"),
+                False,
+            ),
+            (
                 "multi_asset_signal_report",
                 ["python", "scripts/multi_asset_signal_report.py", "--watchlist", args.watchlist],
                 has("scripts/multi_asset_signal_report.py"),

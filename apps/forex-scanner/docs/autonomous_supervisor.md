@@ -1,25 +1,41 @@
 # Autonomous Supervisor v0 (paper/demo only)
 
-## Purpose
+## Purpose and canonical API
 
 Autonomous Supervisor v0 is a conservative orchestration layer for Forex Supervisor paper/demo operation. It runs the existing demo bot in bounded foreground cycles so operators can observe supervised autonomy without enabling live trading or broker-live execution.
 
-It is intentionally limited to paper/demo workflows. This feature does **not** authorize live trading.
+The canonical implementation lives at:
+
+```text
+app/execution/autonomous_supervisor.py
+```
+
+The legacy compatibility import path remains available, but it only re-exports the canonical API:
+
+```text
+app/supervisor/autonomous.py
+```
+
+This feature does **not** authorize live trading.
 
 ## Safety model
 
-Before every cycle, the supervisor calls the central demo-bot safety lock and only then uses `DemoBotService.run_cycle(...)` as its execution primitive. The supervisor:
+Before every attempted cycle, the supervisor calls the central demo-bot safety lock, `ensure_demo_bot_safe_mode(...)`, and only then uses `DemoBotService.run_cycle(...)` as its paper execution primitive. In disabled or dry-run mode it still validates the same safety lock and skips paper order creation.
+
+The supervisor:
 
 - requires the normal paper/demo safety environment (`EXECUTION_MODE=paper`, `ALLOW_LIVE_TRADING=false`, `BROKER_MODE=paper`, `AUTO_BOT_ENABLED=false`);
 - defaults to disabled and dry-run mode;
 - never mutates `.env` files;
-- never prints credentials;
+- never prints broker credentials;
 - never creates a hidden daemon, scheduler, or default infinite loop;
 - never enables broker-live execution;
-- never performs broker order submission;
+- never calls broker or MT5 order submission;
+- runs with bounded `max_cycles` when invoked by the CLI;
+- can run with the synthetic provider in cloud/paper mode without MT5 installed;
 - writes report safety flags proving live execution was not allowed.
 
-## Environment variables
+## Safe default environment variables
 
 The conservative defaults are:
 
@@ -41,12 +57,40 @@ BROKER_MODE=paper
 AUTO_BOT_ENABLED=false
 ```
 
-## Usage examples
+## Canonical CLI contract
 
-From `apps/forex-scanner`:
+From `apps/forex-scanner`, use:
 
 ```bash
-python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --export-json --export-txt
+python scripts/run_autonomous_supervisor.py [options]
+```
+
+Canonical public options:
+
+- `--style`: trading style to pass to the demo bot.
+- `--symbols`: one or more symbols to scan; ignored when `--watchlist` is supplied.
+- `--watchlist`: named paper/demo watchlist.
+- `--once`: force one bounded cycle regardless of `--max-cycles`.
+- `--max-cycles`: maximum foreground cycles; default is `3` from the conservative config.
+- `--interval-seconds`: seconds between bounded cycles.
+- `--dry-run` / `--no-dry-run`: keep validation-only mode or allow paper order creation through `DemoBotService` only.
+- `--export-json`: write `reports/autonomous_supervisor_summary.json`.
+- `--export-txt`: write `reports/autonomous_supervisor_report.txt`.
+
+Backward-compatible aliases from the early v0 prototype are preserved and documented:
+
+- `--cycles`: alias for `--max-cycles`.
+- `--no-export`: no-op safety alias because exports are already opt-in unless `--export-json` or `--export-txt` is supplied.
+- `--no-sleep`: sets the interval to `0` for bounded local validation loops.
+
+Expected conservative stops such as dry-run completion, safety block, operator controls, and risk stops return CLI success. Runtime implementation failures return failure.
+
+## Usage examples
+
+Run the default safe dry-run validation once and export reports:
+
+```bash
+python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --dry-run --export-json --export-txt
 ```
 
 Run a bounded enabled dry-run loop:
@@ -55,10 +99,16 @@ Run a bounded enabled dry-run loop:
 python scripts/run_autonomous_supervisor.py --enabled --dry-run --max-cycles 3 --interval-seconds 300 --symbols EUR/USD GBP/USD
 ```
 
-Run one enabled paper/demo cycle that may create paper orders only:
+Run one bounded paper/demo cycle that may create **paper orders only**:
 
 ```bash
 python scripts/run_autonomous_supervisor.py --enabled --no-dry-run --once --symbols EUR/USD
+```
+
+Run bounded cloud-safe paper validation without MT5 using synthetic data:
+
+```bash
+python scripts/run_autonomous_supervisor.py --provider synthetic --enabled --dry-run --max-cycles 1 --interval-seconds 0 --symbols EUR/USD
 ```
 
 Use a named watchlist:
@@ -74,7 +124,7 @@ When exports are requested, the supervisor writes:
 - `reports/autonomous_supervisor_summary.json`
 - `reports/autonomous_supervisor_report.txt`
 
-Reports include:
+Reports use the stable top-level contract:
 
 - `started_at`
 - `completed_at`
@@ -85,9 +135,11 @@ Reports include:
 - `dry_run`
 - `final_status`
 - `stop_reason`
-- paper orders created
-- risk summaries
-- safety flags proving live execution was not allowed
+- `orders_created`
+- `risk_summaries`
+- `safety_flags`
+
+The safety flags include explicit evidence that `live_execution_allowed`, `broker_live_execution_allowed`, and `broker_order_submission_allowed` were false, and that no hidden daemon or default infinite loop was created.
 
 ## Autonomy limits
 
@@ -99,8 +151,6 @@ The supervisor stops when any configured bound or safety condition is reached:
 - consecutive failures reach `AUTONOMOUS_SUPERVISOR_MAX_CONSECUTIVE_FAILURES`;
 - consecutive zero-paper-order, rejected, or blocked cycles reach `AUTONOMOUS_SUPERVISOR_MAX_ZERO_ORDER_CYCLES`.
 
-Expected conservative stops such as dry-run, safety block, operator controls, or risk stops are normal outcomes for demo operation, not live-trading permission.
-
 ## Explicit live-trading warning
 
-Autonomous Supervisor v0 does **not** authorize live trading. It does not add broker-live execution and must not be used as evidence that a real-money broker account is approved for automated execution.
+Autonomous Supervisor v0 does **not** authorize live trading. It does not add broker-live execution, cannot enable `ALLOW_LIVE_TRADING`, does not submit broker orders, and must not be used as evidence that a real-money broker account is approved for automated execution.

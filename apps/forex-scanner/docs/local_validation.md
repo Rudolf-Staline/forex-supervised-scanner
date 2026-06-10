@@ -19,6 +19,8 @@ Modes :
 - `--quick` : validation rapide cloud-safe
 - `--full` : quick + vérifications étendues (si scripts présents)
 
+Le mode quick inclut une exécution Autonomous Supervisor v0 synthétique, bornée et en dry-run (`--once --dry-run --no-sleep`) quand `scripts/run_autonomous_supervisor.py` est présent.
+
 Options :
 - `--skip-tests`
 - `--skip-scripts`

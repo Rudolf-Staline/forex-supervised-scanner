@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -178,7 +179,7 @@ def test_json_and_txt_exports_work(settings, database, tmp_path) -> None:
     assert str(json_path) in result.export_paths
     assert str(txt_path) in result.export_paths
     assert '"final_status": "COMPLETED"' in json_path.read_text(encoding="utf-8")
-    assert "paper orders created: 1" in txt_path.read_text(encoding="utf-8")
+    assert "orders_created: 1" in txt_path.read_text(encoding="utf-8")
 
 
 def test_unsafe_live_trading_settings_are_blocked(settings, database, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -204,10 +205,115 @@ def test_supervisor_does_not_mutate_env_file(settings, database, tmp_path, monke
     assert env_file.read_text(encoding="utf-8") == original
 
 
-def test_no_broker_live_or_order_submission_behavior_in_supervisor_source() -> None:
+def test_no_broker_live_order_submission_or_daemon_behavior_in_supervisor_source() -> None:
     source = Path(autonomous_module.__file__).read_text(encoding="utf-8")
     forbidden_call = "order" + "_" + "send"
 
     assert forbidden_call not in source
     assert "broker_live_enabled = True" not in source
+    assert "live_execution_allowed = True" not in source
     assert "while True" not in source
+    assert "threading" not in source
+    assert "multiprocessing" not in source
+    assert "daemon=True" not in source
+
+
+def test_compatibility_module_only_reexports_canonical_api() -> None:
+    import app.supervisor.autonomous as compat
+
+    assert compat.AutonomousSupervisorService is autonomous_module.AutonomousSupervisorService
+    assert compat.AutonomousSupervisorConfig is autonomous_module.AutonomousSupervisorConfig
+    compat_source = Path(compat.__file__).read_text(encoding="utf-8")
+    assert "class AutonomousSupervisorService" not in compat_source
+    assert "def run_loop" not in compat_source
+
+
+def test_report_schema_uses_stable_canonical_fields(settings, database, tmp_path) -> None:
+    result = AutonomousSupervisorService(settings, object(), database).run_loop(
+        enabled_config(export_json=True, export_txt=True, reports_dir=tmp_path)
+    )
+
+    payload = json.loads((tmp_path / "autonomous_supervisor_summary.json").read_text(encoding="utf-8"))
+    required = {
+        "started_at",
+        "completed_at",
+        "cycle_count",
+        "style",
+        "symbols",
+        "watchlist",
+        "dry_run",
+        "final_status",
+        "stop_reason",
+        "orders_created",
+        "risk_summaries",
+        "safety_flags",
+    }
+    assert required <= payload.keys()
+    assert "paper_orders_created" not in payload
+    assert payload["orders_created"] == result.orders_created == result.paper_orders_created == 1
+    assert payload["safety_flags"]["live_execution_allowed"] is False
+    assert payload["safety_flags"]["broker_order_submission_allowed"] is False
+    assert payload["safety_flags"]["hidden_daemon_created"] is False
+    assert payload["safety_flags"]["infinite_loop_default"] is False
+    assert payload["risk_summaries"]
+    txt = (tmp_path / "autonomous_supervisor_report.txt").read_text(encoding="utf-8")
+    assert "orders_created: 1" in txt
+    assert "Safety flags proving live execution was not allowed" in txt
+
+
+def test_safety_lock_runs_before_demo_bot_cycle(settings, database, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    def fake_ensure(*args, **kwargs) -> None:
+        calls.append("ensure_demo_bot_safe_mode")
+
+    class OrderedFakeDemoBotService(FakeDemoBotService):
+        def run_cycle(self, style: TradingStyle, symbols: list[str], watchlist: str | None = None) -> DemoBotCycleResult:
+            calls.append("demo_bot_run_cycle")
+            return super().run_cycle(style, symbols, watchlist)
+
+    monkeypatch.setattr(autonomous_module, "ensure_demo_bot_safe_mode", fake_ensure)
+    monkeypatch.setattr(autonomous_module, "DemoBotService", OrderedFakeDemoBotService)
+
+    AutonomousSupervisorService(settings, object(), database).run_loop(enabled_config(max_cycles=1))
+
+    assert calls == ["ensure_demo_bot_safe_mode", "demo_bot_run_cycle"]
+
+
+def test_supervisor_source_does_not_print_broker_credential_values() -> None:
+    source = Path(autonomous_module.__file__).read_text(encoding="utf-8")
+    lowered = source.lower()
+
+    assert "mt5_password" not in lowered
+    assert "mt5_login" not in lowered
+    assert "credential" not in lowered
+
+
+def test_cli_help_documents_canonical_options_and_legacy_aliases() -> None:
+    import subprocess
+
+    completed = subprocess.run(
+        ["python", "scripts/run_autonomous_supervisor.py", "--help"],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    help_text = completed.stdout
+    for option in [
+        "--style",
+        "--symbols",
+        "--watchlist",
+        "--once",
+        "--max-cycles",
+        "--cycles",
+        "--interval-seconds",
+        "--dry-run",
+        "--no-dry-run",
+        "--export-json",
+        "--export-txt",
+        "--no-export",
+        "--no-sleep",
+    ]:
+        assert option in help_text
