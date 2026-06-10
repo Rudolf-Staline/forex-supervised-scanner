@@ -252,3 +252,12 @@ def test_integration_flags_generate_recovery_plan_on_readiness_block(tmp_path: P
     assert "recovery_plan=" in result.stdout
     assert (tmp_path / "autonomous_recovery_plan.json").exists()
     assert (tmp_path / "autonomous_recovery_plan.txt").exists()
+def test_recovery_planner_never_unblocks_supervisor_directly() -> None:
+    from app.execution.autonomous_recovery import AutonomousRecoveryActionType, _action
+    action = _action(AutonomousRecoveryActionType.RUN_READINESS_ONLY, [])
+    assert action.safe_to_execute_automatically is True
+    assert "supervisor" not in str(action.command_suggestion).lower()
+    assert "readiness" in str(action.command_suggestion).lower()
+
+    action2 = _action(AutonomousRecoveryActionType.KEEP_SUPERVISOR_BLOCKED, [])
+    assert action2.safe_to_execute_automatically is False
