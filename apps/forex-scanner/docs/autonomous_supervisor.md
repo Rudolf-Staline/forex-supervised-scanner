@@ -169,3 +169,19 @@ python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --dry-run -
 ```
 
 `--skip-readiness-gate` is diagnostic-only and only accepted in dry-run mode; it cannot enable non-dry-run paper cycles while readiness is blocking. See [`autonomous_readiness_gate.md`](autonomous_readiness_gate.md).
+
+## Building evidence before supervisor runs
+
+The supervisor CLI can run the Autonomous Evidence Builder before invoking the readiness gate:
+
+```bash
+python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --dry-run --build-evidence-first --evidence-mode read-only --readiness-only --export-json --export-txt
+```
+
+For non-dry-run paper supervisor cycles, blocking evidence failures prevent the supervisor from running. Dry-run diagnostics can still print evidence and readiness results without creating paper orders. The sequence is:
+
+```text
+Evidence Builder -> Readiness Gate -> Autonomous Supervisor -> Reports/Audit
+```
+
+The feature remains paper/demo-only and does not enable live trading, broker-live execution, MT5 order execution, or `order_send`.

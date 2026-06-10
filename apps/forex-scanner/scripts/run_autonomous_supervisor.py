@@ -66,6 +66,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-export", action="store_true", help="Backward-compatible no-op alias; exports remain opt-in unless --export-json/--export-txt are provided.")
     parser.add_argument("--no-sleep", action="store_true", help="Backward-compatible alias that sets --interval-seconds 0 for bounded loops.")
     parser.add_argument("--reports-dir", default="reports", help="Report directory. Default: apps/forex-scanner/reports.")
+    parser.add_argument("--build-evidence-first", action="store_true", help="Run Autonomous Evidence Builder before readiness gate evaluation.")
+    parser.add_argument("--evidence-mode", default="read-only", choices=["dry-run", "read-only", "refresh"], help="Evidence builder mode used with --build-evidence-first.")
     return parser.parse_args()
 
 
@@ -94,6 +96,8 @@ def main() -> int:
         readiness_only=args.readiness_only,
         export_readiness_json=args.export_readiness_json,
         export_readiness_txt=args.export_readiness_txt,
+        build_evidence_first=args.build_evidence_first,
+        evidence_mode=args.evidence_mode,
     )
     service = AutonomousSupervisorService(settings, provider, database)
     result = service.run_once(config) if args.once else service.run_loop(config)
@@ -104,6 +108,15 @@ def main() -> int:
         f"stop_reason={result.stop_reason or '-'}"
     )
     print("safety=paper_demo_only live_execution_allowed=false broker_order_submission_allowed=false")
+    if result.evidence_report is not None:
+        print(
+            "evidence="
+            f"{result.evidence_report.final_status.value} "
+            f"tasks={result.evidence_report.tasks_total} "
+            f"failed={result.evidence_report.tasks_failed} skipped={result.evidence_report.tasks_skipped}"
+        )
+        for reason in result.evidence_report.blocking_failures:
+            print(f"evidence_block={reason}")
     if result.readiness_report is not None:
         print(
             "readiness="

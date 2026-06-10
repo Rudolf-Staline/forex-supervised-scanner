@@ -110,3 +110,21 @@ python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --dry-run -
 ```
 
 This remains paper/demo only and does not authorize live trading. See [`docs/autonomous_readiness_gate.md`](docs/autonomous_readiness_gate.md).
+
+### Autonomous Evidence Builder
+
+The paper/demo autonomy pipeline is now:
+
+```text
+Evidence Builder -> Readiness Gate -> Autonomous Supervisor -> Reports/Audit
+```
+
+Run the evidence builder before readiness checks when you need reproducible local readiness inputs:
+
+```bash
+python scripts/autonomous_evidence_builder.py --mode read-only --include-readiness --export-json --export-txt
+```
+
+Supported modes are `dry-run`, `read-only`, and `refresh`. The default is conservative read-only operation against local report artifacts. Generated evidence includes session health, data health, failure diagnostics, signal anomaly detection, and a static/no-MT5 symbol mapping audit. Missing required evidence blocks paper autonomy through the readiness gate; optional evidence produces warnings or skips.
+
+This remains diagnostic-only. It does not authorize live trading, does not enable broker-live execution, does not require MT5 in CI, and does not call `order_send`.

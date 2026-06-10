@@ -94,3 +94,19 @@ python scripts/run_autonomous_supervisor.py --enabled --dry-run --skip-readiness
 ## Live-trading warning
 
 This gate remains strictly paper/demo only. It does not add broker-live execution, does not call order submission APIs, and must not be used as evidence that live trading is approved.
+
+## Evidence Builder integration
+
+Before evaluating the readiness gate, operators can refresh local evidence with the Autonomous Evidence Builder:
+
+```bash
+python scripts/autonomous_readiness_report.py --build-evidence-first --evidence-mode read-only --export-json --export-txt
+```
+
+The resulting pipeline is:
+
+```text
+Evidence Builder -> Readiness Gate -> Autonomous Supervisor -> Reports/Audit
+```
+
+The readiness gate remains conservative: missing required evidence, stale evidence, poor data health, failing session health, or blocking failure diagnostics can prevent paper autonomy. Optional evidence such as anomaly detection and static MT5 symbol mapping contributes warnings without requiring MT5 in CI. This still does not authorize live trading or broker execution.
