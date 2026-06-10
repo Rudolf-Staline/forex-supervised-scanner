@@ -18,6 +18,12 @@ from pydantic import BaseModel, Field
 
 from app.config.safety import DemoSafetyError, demo_safety_status, ensure_demo_bot_safe_mode
 from app.config.settings import AppSettings, PROJECT_ROOT
+from app.execution.autonomous_policy import (
+    AutonomousPolicyConfig,
+    AutonomousPolicyContext,
+    AutonomousPolicyEngine,
+    AutonomousPolicyMode,
+)
 from app.risk.daily_limits import DailyRiskConfig, summarize_daily_risk
 from app.storage.database import Database
 
@@ -117,6 +123,7 @@ class AutonomousReadinessReport(BaseModel):
     missing_reports: list[str] = Field(default_factory=list)
     operator_controls: dict[str, Any] = Field(default_factory=dict)
     risk_snapshot: dict[str, Any] = Field(default_factory=dict)
+    policy_decision: dict[str, Any] | None = None
     safety_flags: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -233,6 +240,21 @@ class AutonomousReadinessService:
             final_status == AutonomousReadinessFinalStatus.WARN_READY and selected.allow_warn_ready_for_dry_run
         )
         paper_run_allowed = final_status == AutonomousReadinessFinalStatus.READY
+
+        # --- Policy engine check ---
+        _readiness_mode = AutonomousPolicyMode.DRY_RUN if selected.dry_run else AutonomousPolicyMode.READ_ONLY
+        policy_engine = AutonomousPolicyEngine(AutonomousPolicyConfig(
+            mode=_readiness_mode,
+            dry_run=selected.dry_run,
+            readiness_status=final_status.value,
+        ))
+        policy_ctx = AutonomousPolicyContext(
+            mode=_readiness_mode,
+            dry_run=selected.dry_run,
+            readiness_status=final_status.value,
+        )
+        policy_decision_result = policy_engine.can_run_readiness(policy_ctx)
+
         return AutonomousReadinessReport(
             generated_at=generated_at,
             final_status=final_status,
@@ -247,6 +269,7 @@ class AutonomousReadinessService:
             missing_reports=sorted(set(missing)),
             operator_controls=operator_controls,
             risk_snapshot=risk_snapshot,
+            policy_decision=policy_decision_result.model_dump(mode="json"),
             safety_flags=safety_flags,
         )
 

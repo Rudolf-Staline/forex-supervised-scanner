@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.config.env import load_dotenv
 from app.config.settings import load_settings

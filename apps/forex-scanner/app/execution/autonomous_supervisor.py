@@ -32,6 +32,13 @@ from app.execution.autonomous_evidence import (
     AutonomousEvidenceReport,
     build_evidence,
 )
+from app.execution.autonomous_policy import (
+    AutonomousPolicyConfig,
+    AutonomousPolicyContext,
+    AutonomousPolicyDecision,
+    AutonomousPolicyEngine,
+    AutonomousPolicyMode,
+)
 from app.execution.autonomous_recovery import (
     AutonomousRecoveryConfig,
     AutonomousRecoveryPlan,
@@ -215,6 +222,7 @@ class AutonomousSupervisorRunResult(BaseModel):
     readiness_report: AutonomousReadinessReport | None = None
     evidence_report: AutonomousEvidenceReport | None = None
     recovery_plan: AutonomousRecoveryPlan | None = None
+    policy_decision: dict[str, object] | None = None
 
     @property
     def paper_orders_created(self) -> int:
@@ -282,11 +290,22 @@ class AutonomousSupervisorService:
                 result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
                 return result
         if selected.skip_readiness_gate:
-            if not selected.dry_run:
+            # --- Policy engine check: skip_readiness_gate ---
+            _skip_policy = AutonomousPolicyEngine(AutonomousPolicyConfig(
+                mode=AutonomousPolicyMode.DRY_RUN if selected.dry_run else AutonomousPolicyMode.PAPER,
+                dry_run=selected.dry_run,
+                skip_readiness_gate=True,
+            ))
+            skip_decision = _skip_policy.can_skip_readiness_gate(AutonomousPolicyContext(
+                mode=AutonomousPolicyMode.DRY_RUN if selected.dry_run else AutonomousPolicyMode.PAPER,
+                dry_run=selected.dry_run,
+                skip_readiness_gate=True,
+            ))
+            if not skip_decision.allowed:
                 final_status = AutonomousSupervisorFinalStatus.BLOCKED_BY_READINESS
                 stop_reason = "--skip-readiness-gate is diagnostic-only and is allowed only with dry_run=true"
                 recovery_plan = self._maybe_build_recovery_plan(selected)
-                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report, recovery_plan)
+                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report, recovery_plan, policy_decision=skip_decision.model_dump(mode="json"))
                 result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
                 return result
         else:
@@ -467,6 +486,7 @@ class AutonomousSupervisorService:
         readiness_report: AutonomousReadinessReport | None = None,
         evidence_report: AutonomousEvidenceReport | None = None,
         recovery_plan: AutonomousRecoveryPlan | None = None,
+        policy_decision: dict[str, object] | None = None,
     ) -> AutonomousSupervisorRunResult:
         completed_at = datetime.now(timezone.utc)
         return AutonomousSupervisorRunResult(
@@ -487,6 +507,7 @@ class AutonomousSupervisorService:
             readiness_report=readiness_report,
             evidence_report=evidence_report,
             recovery_plan=recovery_plan,
+            policy_decision=policy_decision,
         )
 
     def _export_result_if_requested(self, config: AutonomousSupervisorConfig, result: AutonomousSupervisorRunResult) -> list[Path]:
@@ -637,6 +658,11 @@ def _format_txt_report(result: AutonomousSupervisorRunResult) -> str:
         lines.append(f"- causes: {len(result.recovery_plan.causes)}")
         lines.append(f"- actions: {len(result.recovery_plan.actions)}")
         lines.append(f"- next_recommended_command: {result.recovery_plan.next_recommended_command or '-'}")
+    if result.policy_decision is not None:
+        lines.extend(["", "Policy decision:"])
+        lines.append(f"- decision: {result.policy_decision.get('decision', '-')}")
+        lines.append(f"- allowed: {str(result.policy_decision.get('allowed', '-')).lower()}")
+        lines.append(f"- action: {result.policy_decision.get('action', '-')}")
     lines.extend(["", "Cycles:"])
     if not result.cycles:
         lines.append("- none")

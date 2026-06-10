@@ -20,6 +20,12 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.config.settings import PROJECT_ROOT
+from app.execution.autonomous_policy import (
+    AutonomousPolicyConfig,
+    AutonomousPolicyContext,
+    AutonomousPolicyEngine,
+    AutonomousPolicyMode,
+)
 
 DEFAULT_AUTONOMOUS_RECOVERY_REPORTS_DIR = PROJECT_ROOT / "reports"
 DEFAULT_AUTONOMOUS_RECOVERY_JSON_REPORT = "autonomous_recovery_plan.json"
@@ -131,6 +137,7 @@ class AutonomousRecoveryPlan(BaseModel):
     executed_actions: list[str] = Field(default_factory=list)
     skipped_actions: list[str] = Field(default_factory=list)
     blocking_reasons: list[str] = Field(default_factory=list)
+    policy_decisions: list[dict[str, object]] = Field(default_factory=list)
     safety_flags: dict[str, object] = Field(default_factory=dict)
     next_recommended_command: str | None = None
 
@@ -219,8 +226,27 @@ class AutonomousRecoveryPlannerService:
         actions: list[AutonomousRecoveryAction] = []
         executed: list[str] = []
         skipped: list[str] = []
+        policy_decisions: list[dict[str, object]] = []
         for action in plan.actions:
             updated = action.model_copy(deep=True)
+
+            # --- Policy engine check per action ---
+            _exec_mode = AutonomousPolicyMode.DRY_RUN if selected.dry_run else AutonomousPolicyMode.READ_ONLY
+            policy_engine = AutonomousPolicyEngine(AutonomousPolicyConfig(
+                mode=_exec_mode,
+                dry_run=selected.dry_run,
+                recovery_action_safe=action.safe_to_execute_automatically,
+                recovery_action_manual=action.execution_mode == AutonomousRecoveryExecutionMode.MANUAL_REVIEW,
+            ))
+            policy_ctx = AutonomousPolicyContext(
+                mode=_exec_mode,
+                dry_run=selected.dry_run,
+                recovery_action_safe=action.safe_to_execute_automatically,
+                recovery_action_manual=action.execution_mode == AutonomousRecoveryExecutionMode.MANUAL_REVIEW,
+            )
+            policy_decision = policy_engine.can_execute_recovery_action(policy_ctx)
+            policy_decisions.append(policy_decision.model_dump(mode="json"))
+
             if not selected.execute_safe_actions or not action.safe_to_execute_automatically or action.command_suggestion is None:
                 updated.execution_status = AutonomousRecoveryExecutionStatus.SKIPPED
                 skipped.append(action.action_id.value)
@@ -247,7 +273,7 @@ class AutonomousRecoveryPlannerService:
                     break
             actions.append(updated)
         status = AutonomousRecoveryFinalStatus.RECOVERY_EXECUTED if executed and not skipped else (AutonomousRecoveryFinalStatus.RECOVERY_PARTIAL if executed else plan.final_status)
-        return plan.model_copy(update={"actions": actions, "executed_actions": executed, "skipped_actions": skipped, "final_status": status, "safety_flags": _safety_flags(True, selected.dry_run)})
+        return plan.model_copy(update={"actions": actions, "executed_actions": executed, "skipped_actions": skipped, "final_status": status, "policy_decisions": policy_decisions, "safety_flags": _safety_flags(True, selected.dry_run)})
 
 
 REPORT_NAMES = [

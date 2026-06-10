@@ -152,3 +152,21 @@ python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --dry-run -
 ```
 
 See [`docs/autonomous_recovery_planner.md`](docs/autonomous_recovery_planner.md).
+
+## Autonomous Policy Engine
+
+The Autonomous Policy Engine centralizes autonomy permissions and safety decisions. It answers whether an action is allowed under the current mode, evidence, readiness, recovery, and operator state, returning `ALLOW`, `WARN_ALLOW`, or `DENY` with full rule results and safety flags. Every pipeline component consults the engine before proceeding.
+
+Updated pipeline:
+
+```text
+Evidence Builder -> Readiness Gate -> Recovery Planner -> [Policy Engine] -> Autonomous Supervisor -> Audit Reports
+```
+
+Policy report:
+
+```bash
+python scripts/autonomous_policy_report.py --action run_supervisor --mode dry_run --export-json --export-txt
+```
+
+The policy engine enforces 11 safety invariants on every check. It does not enable live trading, does not call MT5, and does not submit orders. See [`docs/autonomous_policy_engine.md`](docs/autonomous_policy_engine.md).

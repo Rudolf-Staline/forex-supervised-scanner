@@ -39,6 +39,12 @@ from app.reporting.session_health import (
     export_session_health_json,
 )
 from app.reporting.signal_anomaly_detector import build_summary, collect_records, detect_anomalies
+from app.execution.autonomous_policy import (
+    AutonomousPolicyConfig,
+    AutonomousPolicyContext,
+    AutonomousPolicyEngine,
+    AutonomousPolicyMode,
+)
 from app.storage.database import Database
 
 DEFAULT_AUTONOMOUS_EVIDENCE_REPORTS_DIR = PROJECT_ROOT / "reports"
@@ -144,6 +150,7 @@ class AutonomousEvidenceReport(BaseModel):
     task_results: list[AutonomousEvidenceTaskResult] = Field(default_factory=list)
     output_paths: list[str] = Field(default_factory=list)
     readiness_report: dict[str, Any] | None = None
+    policy_decision: dict[str, Any] | None = None
     safety_flags: dict[str, object] = Field(default_factory=dict)
 
 
@@ -160,6 +167,24 @@ class AutonomousEvidenceBuilderService:
         results: list[AutonomousEvidenceTaskResult] = []
         output_paths: list[str] = []
         readiness: ReadinessReport | None = None
+
+        # --- Policy engine check ---
+        _mode_map = {
+            AutonomousEvidenceMode.DRY_RUN: AutonomousPolicyMode.DRY_RUN,
+            AutonomousEvidenceMode.READ_ONLY: AutonomousPolicyMode.READ_ONLY,
+            AutonomousEvidenceMode.REFRESH: AutonomousPolicyMode.PAPER,
+        }
+        policy_engine = AutonomousPolicyEngine(AutonomousPolicyConfig(
+            mode=_mode_map.get(selected.mode, AutonomousPolicyMode.DRY_RUN),
+            dry_run=selected.mode == AutonomousEvidenceMode.DRY_RUN,
+            allow_subprocess_fallback=selected.allow_subprocess,
+        ))
+        policy_ctx = AutonomousPolicyContext(
+            mode=_mode_map.get(selected.mode, AutonomousPolicyMode.DRY_RUN),
+            dry_run=selected.mode == AutonomousEvidenceMode.DRY_RUN,
+            allow_subprocess_fallback=selected.allow_subprocess,
+        )
+        policy_decision = policy_engine.can_build_evidence(policy_ctx)
 
         for task in plan:
             result = self._run_task(task, selected)
@@ -186,6 +211,7 @@ class AutonomousEvidenceBuilderService:
             task_results=results,
             output_paths=sorted(set(output_paths)),
             readiness_report=readiness.model_dump(mode="json") if readiness is not None else None,
+            policy_decision=policy_decision.model_dump(mode="json"),
             safety_flags=_safety_flags(selected),
         )
         exports: list[Path] = []

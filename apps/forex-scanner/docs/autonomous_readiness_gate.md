@@ -126,3 +126,17 @@ python scripts/autonomous_readiness_report.py --build-evidence-first --evidence-
 ```
 
 The Recovery Planner reads readiness/evidence/report artifacts, classifies blocker causes, and recommends bounded dry-run/read-only diagnostics or manual reviews. It never changes readiness status itself and never bypasses the gate.
+
+## Policy Engine Integration
+
+The Readiness Gate now consults the Autonomous Policy Engine via `can_run_readiness()` before evaluating readiness checks. The policy engine verifies that readiness inspection is permitted under the current operating mode and safety state. Since readiness checks are a read-only inspection layer, `can_run_readiness()` is allowed in all modes.
+
+The policy decision is included in the readiness report under the `policy_decision` field of `reports/autonomous_readiness_report.json`. The decision contains the full rule evaluation results, safety flags, and any warnings.
+
+The updated safe autonomy pipeline is:
+
+```text
+Evidence Builder -> Readiness Gate -> Recovery Planner -> [Policy Engine] -> Autonomous Supervisor -> Audit Reports
+```
+
+The policy engine does not change readiness evaluation behavior. It provides an auditable permission check before the gate runs. This remains paper/demo-only and does not authorize live trading. See [`autonomous_policy_engine.md`](autonomous_policy_engine.md).
