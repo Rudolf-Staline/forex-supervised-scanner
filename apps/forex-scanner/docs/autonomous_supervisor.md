@@ -175,7 +175,7 @@ python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --dry-run -
 The supervisor CLI can run the Autonomous Evidence Builder before invoking the readiness gate:
 
 ```bash
-python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --dry-run --build-evidence-first --evidence-mode read-only --readiness-only --export-json --export-txt
+python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --dry-run --build-evidence-first --evidence-mode read-only --readiness-only --plan-recovery-on-block --export-json --export-txt
 ```
 
 For non-dry-run paper supervisor cycles, blocking evidence failures prevent the supervisor from running. Dry-run diagnostics can still print evidence and readiness results without creating paper orders. The sequence is:
