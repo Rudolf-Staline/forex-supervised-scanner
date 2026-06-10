@@ -72,3 +72,19 @@ The builder is intentionally diagnostic-only:
 - no network dependency for cloud-safe tests.
 
 These reports are readiness evidence only. They never authorize live trading.
+
+## Recovery planning on blocked evidence
+
+The safe autonomy pipeline now includes the recovery planner:
+
+```text
+Evidence Builder -> Readiness Gate -> Recovery Planner -> Autonomous Supervisor -> Audit Reports
+```
+
+If evidence generation blocks, operators can request a bounded recovery plan without running supervisor cycles:
+
+```bash
+python scripts/autonomous_evidence_builder.py --mode read-only --plan-recovery-on-block --export-recovery-json --export-recovery-txt
+```
+
+The recovery plan recommends safe dry-run/read-only diagnostics or manual review actions. It does not bypass readiness and does not authorize live trading.

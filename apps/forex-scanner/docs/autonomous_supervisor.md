@@ -185,3 +185,19 @@ Evidence Builder -> Readiness Gate -> Autonomous Supervisor -> Reports/Audit
 ```
 
 The feature remains paper/demo-only and does not enable live trading, broker-live execution, MT5 order execution, or `order_send`.
+
+## Recovery planning before supervisor cycles
+
+The full safe autonomy pipeline is:
+
+```text
+Evidence Builder -> Readiness Gate -> Recovery Planner -> Autonomous Supervisor -> Audit Reports
+```
+
+Use `--plan-recovery-on-block` to generate a recovery plan when evidence or readiness prevents supervisor cycles:
+
+```bash
+python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --dry-run --build-evidence-first --evidence-mode read-only --readiness-only --plan-recovery-on-block --export-recovery-json --export-recovery-txt
+```
+
+If recovery is needed, supervisor cycles remain blocked. The recovery summary can be embedded in supervisor output and exported as `reports/autonomous_recovery_plan.json` and `.txt`.

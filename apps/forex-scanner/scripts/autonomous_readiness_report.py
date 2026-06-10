@@ -10,6 +10,12 @@ from pathlib import Path
 from app.config.env import load_dotenv
 from app.config.settings import load_settings
 from app.execution.autonomous_evidence import AutonomousEvidenceConfig, build_evidence
+from app.execution.autonomous_recovery import (
+    AutonomousRecoveryConfig,
+    build_recovery_plan,
+    export_autonomous_recovery_json,
+    export_autonomous_recovery_txt,
+)
 from app.execution.autonomous_readiness import (
     AutonomousReadinessConfig,
     build_readiness_report,
@@ -36,6 +42,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--export-txt", action="store_true", help="Write reports/autonomous_readiness_report.txt.")
     parser.add_argument("--build-evidence-first", action="store_true", help="Run the read-only evidence builder before readiness evaluation.")
     parser.add_argument("--evidence-mode", default="read-only", choices=["dry-run", "read-only", "refresh"], help="Evidence builder mode used with --build-evidence-first.")
+    parser.add_argument("--plan-recovery-on-block", action="store_true")
+    parser.add_argument("--export-recovery-json", action="store_true")
+    parser.add_argument("--export-recovery-txt", action="store_true")
     return parser.parse_args()
 
 
@@ -73,6 +82,13 @@ def main() -> int:
         print(f"json_export={export_autonomous_readiness_json(report, config.reports_dir)}")
     if args.export_txt:
         print(f"txt_export={export_autonomous_readiness_txt(report, config.reports_dir)}")
+    if args.plan_recovery_on_block and not report.paper_run_allowed:
+        plan = build_recovery_plan(AutonomousRecoveryConfig(reports_dir=config.reports_dir))
+        print(f"recovery_plan={plan.final_status.value} causes={len(plan.causes)} actions={len(plan.actions)}")
+        if args.export_recovery_json:
+            print(f"recovery_json_export={export_autonomous_recovery_json(plan, config.reports_dir)}")
+        if args.export_recovery_txt:
+            print(f"recovery_txt_export={export_autonomous_recovery_txt(plan, config.reports_dir)}")
     return 0 if report.dry_run_allowed else 1
 
 

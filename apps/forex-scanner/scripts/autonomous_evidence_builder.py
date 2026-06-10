@@ -9,6 +9,12 @@ from pathlib import Path
 
 from app.config.env import load_dotenv
 from app.config.settings import load_settings
+from app.execution.autonomous_recovery import (
+    AutonomousRecoveryConfig,
+    build_recovery_plan,
+    export_autonomous_recovery_json,
+    export_autonomous_recovery_txt,
+)
 from app.execution.autonomous_evidence import (
     AutonomousEvidenceConfig,
     AutonomousEvidenceFinalStatus,
@@ -43,6 +49,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--export-txt", action="store_true")
     parser.add_argument("--fail-fast", action="store_true")
     parser.add_argument("--allow-subprocess", action="store_true")
+    parser.add_argument("--plan-recovery-on-block", action="store_true")
+    parser.add_argument("--export-recovery-json", action="store_true")
+    parser.add_argument("--export-recovery-txt", action="store_true")
     return parser.parse_args()
 
 
@@ -79,6 +88,13 @@ def main() -> int:
     print(f"readiness_re_evaluated={str(report.readiness_report is not None).lower()}")
     if report.readiness_report is not None:
         print(f"readiness={report.readiness_report.get('final_status')}")
+    if args.plan_recovery_on_block and report.final_status == AutonomousEvidenceFinalStatus.BLOCKED_EVIDENCE:
+        plan = build_recovery_plan(AutonomousRecoveryConfig(reports_dir=Path(args.reports_dir)))
+        print(f"recovery_plan={plan.final_status.value} causes={len(plan.causes)} actions={len(plan.actions)}")
+        if args.export_recovery_json:
+            print(f"recovery_json_export={export_autonomous_recovery_json(plan, Path(args.reports_dir))}")
+        if args.export_recovery_txt:
+            print(f"recovery_txt_export={export_autonomous_recovery_txt(plan, Path(args.reports_dir))}")
     print(SAFETY_WARNING)
     return 1 if report.final_status == AutonomousEvidenceFinalStatus.BLOCKED_EVIDENCE else 0
 

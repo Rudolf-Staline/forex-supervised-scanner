@@ -32,6 +32,13 @@ from app.execution.autonomous_evidence import (
     AutonomousEvidenceReport,
     build_evidence,
 )
+from app.execution.autonomous_recovery import (
+    AutonomousRecoveryConfig,
+    AutonomousRecoveryPlan,
+    build_recovery_plan,
+    export_autonomous_recovery_json,
+    export_autonomous_recovery_txt,
+)
 from app.execution.autonomous_readiness import (
     AutonomousReadinessConfig,
     AutonomousReadinessFinalStatus,
@@ -100,6 +107,9 @@ class AutonomousSupervisorConfig(BaseModel):
     export_readiness_txt: bool = False
     build_evidence_first: bool = False
     evidence_mode: AutonomousEvidenceMode = AutonomousEvidenceMode.READ_ONLY
+    plan_recovery_on_block: bool = False
+    export_recovery_json: bool = False
+    export_recovery_txt: bool = False
 
     @field_validator("symbols")
     @classmethod
@@ -204,6 +214,7 @@ class AutonomousSupervisorRunResult(BaseModel):
     export_paths: list[str] = Field(default_factory=list)
     readiness_report: AutonomousReadinessReport | None = None
     evidence_report: AutonomousEvidenceReport | None = None
+    recovery_plan: AutonomousRecoveryPlan | None = None
 
     @property
     def paper_orders_created(self) -> int:
@@ -247,6 +258,7 @@ class AutonomousSupervisorService:
 
         readiness_report: AutonomousReadinessReport | None = None
         evidence_report: AutonomousEvidenceReport | None = None
+        recovery_plan: AutonomousRecoveryPlan | None = None
         if selected.build_evidence_first:
             evidence_report = build_evidence(
                 settings=self.settings,
@@ -265,14 +277,16 @@ class AutonomousSupervisorService:
             if evidence_report.final_status == AutonomousEvidenceFinalStatus.BLOCKED_EVIDENCE and not selected.dry_run:
                 final_status = AutonomousSupervisorFinalStatus.BLOCKED_BY_READINESS
                 stop_reason = "; ".join(evidence_report.blocking_failures) or "evidence builder reported blocking failures"
-                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report)
+                recovery_plan = self._maybe_build_recovery_plan(selected)
+                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report, recovery_plan)
                 result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
                 return result
         if selected.skip_readiness_gate:
             if not selected.dry_run:
                 final_status = AutonomousSupervisorFinalStatus.BLOCKED_BY_READINESS
                 stop_reason = "--skip-readiness-gate is diagnostic-only and is allowed only with dry_run=true"
-                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report)
+                recovery_plan = self._maybe_build_recovery_plan(selected)
+                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report, recovery_plan)
                 result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
                 return result
         else:
@@ -284,7 +298,8 @@ class AutonomousSupervisorService:
             if selected.readiness_only:
                 final_status = AutonomousSupervisorFinalStatus.DRY_RUN if readiness_report.dry_run_allowed else AutonomousSupervisorFinalStatus.BLOCKED_BY_READINESS
                 stop_reason = f"readiness-only check completed with {readiness_report.final_status.value}"
-                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report)
+                recovery_plan = self._maybe_build_recovery_plan(selected)
+                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report, recovery_plan)
                 result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
                 return result
             if readiness_report.final_status == AutonomousReadinessFinalStatus.WARN_READY and selected.dry_run and readiness_report.dry_run_allowed:
@@ -292,7 +307,8 @@ class AutonomousSupervisorService:
             elif not readiness_report.paper_run_allowed:
                 final_status = AutonomousSupervisorFinalStatus.BLOCKED_BY_READINESS
                 stop_reason = "; ".join(readiness_report.blocking_reasons or readiness_report.warning_reasons) or readiness_report.final_status.value
-                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report)
+                recovery_plan = self._maybe_build_recovery_plan(selected)
+                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report, recovery_plan)
                 result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
                 return result
 
@@ -450,6 +466,7 @@ class AutonomousSupervisorService:
         symbols: list[str],
         readiness_report: AutonomousReadinessReport | None = None,
         evidence_report: AutonomousEvidenceReport | None = None,
+        recovery_plan: AutonomousRecoveryPlan | None = None,
     ) -> AutonomousSupervisorRunResult:
         completed_at = datetime.now(timezone.utc)
         return AutonomousSupervisorRunResult(
@@ -469,6 +486,7 @@ class AutonomousSupervisorService:
             safety_flags=_safety_flags(self.settings),
             readiness_report=readiness_report,
             evidence_report=evidence_report,
+            recovery_plan=recovery_plan,
         )
 
     def _export_result_if_requested(self, config: AutonomousSupervisorConfig, result: AutonomousSupervisorRunResult) -> list[Path]:
@@ -483,7 +501,16 @@ class AutonomousSupervisorService:
             paths.append(export_autonomous_readiness_json(result.readiness_report, config.reports_dir))
         if result.readiness_report is not None and config.export_readiness_txt:
             paths.append(export_autonomous_readiness_txt(result.readiness_report, config.reports_dir))
+        if result.recovery_plan is not None and config.export_recovery_json:
+            paths.append(export_autonomous_recovery_json(result.recovery_plan, config.reports_dir))
+        if result.recovery_plan is not None and config.export_recovery_txt:
+            paths.append(export_autonomous_recovery_txt(result.recovery_plan, config.reports_dir))
         return paths
+
+    def _maybe_build_recovery_plan(self, config: AutonomousSupervisorConfig) -> AutonomousRecoveryPlan | None:
+        if not config.plan_recovery_on_block:
+            return None
+        return build_recovery_plan(AutonomousRecoveryConfig(reports_dir=config.reports_dir))
 
     def _sleep(self, seconds: float) -> None:
         if seconds > 0:
@@ -604,6 +631,12 @@ def _format_txt_report(result: AutonomousSupervisorRunResult) -> str:
         lines.append("- none")
     for index, summary in enumerate(result.risk_summaries, start=1):
         lines.append(f"- cycle {index}: {summary}")
+    if result.recovery_plan is not None:
+        lines.extend(["", "Recovery plan summary:"])
+        lines.append(f"- final_status: {result.recovery_plan.final_status.value}")
+        lines.append(f"- causes: {len(result.recovery_plan.causes)}")
+        lines.append(f"- actions: {len(result.recovery_plan.actions)}")
+        lines.append(f"- next_recommended_command: {result.recovery_plan.next_recommended_command or '-'}")
     lines.extend(["", "Cycles:"])
     if not result.cycles:
         lines.append("- none")
