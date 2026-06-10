@@ -77,3 +77,10 @@ Si MetaTrader5 Python package ou terminal MT5 n'est pas disponible, les tests ma
 `MT5 terminal is not available in cloud environment.`
 
 Cela évite de casser la CI cloud tout en conservant les validations MT5 sur machine locale Windows.
+## Autonomous Supervisor v0
+
+Autonomous Supervisor v0 is a bounded foreground runner for paper/demo operation only. It enforces the paper safety lock, runs the existing demo bot for simulated paper orders, writes auditable reports, and never starts a hidden daemon or submits broker/MT5 orders. See [`docs/autonomous_supervisor.md`](docs/autonomous_supervisor.md).
+
+```bash
+python scripts/run_autonomous_supervisor.py --provider synthetic --symbols EUR/USD GBP/USD --cycles 1
+```
