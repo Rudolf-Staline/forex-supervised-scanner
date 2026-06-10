@@ -92,3 +92,21 @@ Bounded paper/demo mode remains paper-only and still does not authorize live tra
 ```bash
 python scripts/run_autonomous_supervisor.py --provider synthetic --enabled --no-dry-run --max-cycles 1 --interval-seconds 0 --symbols EUR/USD
 ```
+
+## Autonomous Readiness Gate
+
+The Autonomous Supervisor is protected by a read-only readiness gate before cycles start. The gate inspects paper/demo safety settings, operator maintenance/degraded controls, paper risk, and fresh local evidence reports. Missing or stale evidence blocks non-dry-run paper autonomy; dry-run diagnostics can receive `WARN_READY` under conservative defaults.
+
+Readiness-only check:
+
+```bash
+python scripts/autonomous_readiness_report.py --export-json --export-txt
+```
+
+Supervisor readiness-only check:
+
+```bash
+python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --dry-run --readiness-only --export-readiness-json --export-readiness-txt
+```
+
+This remains paper/demo only and does not authorize live trading. See [`docs/autonomous_readiness_gate.md`](docs/autonomous_readiness_gate.md).

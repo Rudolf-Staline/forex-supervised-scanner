@@ -25,6 +25,14 @@ from app.config.watchlists import get_watchlist
 from app.core.types import TradingStyle
 from app.data.providers import MarketDataProvider
 from app.execution.demo_bot import DemoBotCycleResult, DemoBotService
+from app.execution.autonomous_readiness import (
+    AutonomousReadinessConfig,
+    AutonomousReadinessFinalStatus,
+    AutonomousReadinessReport,
+    build_readiness_report,
+    export_autonomous_readiness_json,
+    export_autonomous_readiness_txt,
+)
 from app.risk.daily_limits import DailyRiskSummary
 from app.storage.database import Database
 
@@ -49,6 +57,7 @@ class AutonomousSupervisorFinalStatus(StrEnum):
     STOPPED_BY_FAILURES = "STOPPED_BY_FAILURES"
     DRY_RUN = "DRY_RUN"
     BLOCKED_BY_SAFETY = "BLOCKED_BY_SAFETY"
+    BLOCKED_BY_READINESS = "BLOCKED_BY_READINESS"
 
 
 class AutonomousSupervisorCycleStatus(StrEnum):
@@ -78,6 +87,10 @@ class AutonomousSupervisorConfig(BaseModel):
     reports_dir: Path = DEFAULT_AUTONOMOUS_SUPERVISOR_REPORTS_DIR
     export_json: bool = False
     export_txt: bool = False
+    skip_readiness_gate: bool = False
+    readiness_only: bool = False
+    export_readiness_json: bool = False
+    export_readiness_txt: bool = False
 
     @field_validator("symbols")
     @classmethod
@@ -173,6 +186,7 @@ class AutonomousSupervisorRunResult(BaseModel):
     cycles: list[AutonomousSupervisorCycleRecord] = Field(default_factory=list)
     safety_flags: dict[str, object] = Field(default_factory=dict)
     export_paths: list[str] = Field(default_factory=list)
+    readiness_report: AutonomousReadinessReport | None = None
 
     @property
     def paper_orders_created(self) -> int:
@@ -214,12 +228,41 @@ class AutonomousSupervisorService:
         final_status = AutonomousSupervisorFinalStatus.COMPLETED
         stop_reason: str | None = None
 
+        readiness_report: AutonomousReadinessReport | None = None
+        if selected.skip_readiness_gate:
+            if not selected.dry_run:
+                final_status = AutonomousSupervisorFinalStatus.BLOCKED_BY_READINESS
+                stop_reason = "--skip-readiness-gate is diagnostic-only and is allowed only with dry_run=true"
+                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report)
+                result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
+                return result
+        else:
+            readiness_report = build_readiness_report(
+                self.settings,
+                self.database,
+                AutonomousReadinessConfig.from_environment(reports_dir=selected.reports_dir, dry_run=selected.dry_run or not selected.enabled),
+            )
+            if selected.readiness_only:
+                final_status = AutonomousSupervisorFinalStatus.DRY_RUN if readiness_report.dry_run_allowed else AutonomousSupervisorFinalStatus.BLOCKED_BY_READINESS
+                stop_reason = f"readiness-only check completed with {readiness_report.final_status.value}"
+                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report)
+                result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
+                return result
+            if readiness_report.final_status == AutonomousReadinessFinalStatus.WARN_READY and selected.dry_run and readiness_report.dry_run_allowed:
+                pass
+            elif not readiness_report.paper_run_allowed:
+                final_status = AutonomousSupervisorFinalStatus.BLOCKED_BY_READINESS
+                stop_reason = "; ".join(readiness_report.blocking_reasons or readiness_report.warning_reasons) or readiness_report.final_status.value
+                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report)
+                result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
+                return result
+
         if not selected.enabled:
             final_status = AutonomousSupervisorFinalStatus.DRY_RUN
             stop_reason = "AUTONOMOUS_SUPERVISOR_ENABLED is false; paper/demo dry-run validation only"
             record = self._dry_run_record(selected, symbols, 1, [stop_reason])
             records.append(record)
-            result = self._build_result(selected, state, records, final_status, stop_reason, symbols)
+            result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report)
             result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
             return result
 
@@ -273,7 +316,7 @@ class AutonomousSupervisorService:
                 stop_reason = f"completed bounded max_cycles={selected.max_cycles} dry-run validation"
             else:
                 stop_reason = f"completed bounded max_cycles={selected.max_cycles} paper/demo run"
-        result = self._build_result(selected, state, records, final_status, stop_reason, symbols)
+        result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report)
         result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
         return result
 
@@ -366,6 +409,7 @@ class AutonomousSupervisorService:
         final_status: AutonomousSupervisorFinalStatus,
         stop_reason: str | None,
         symbols: list[str],
+        readiness_report: AutonomousReadinessReport | None = None,
     ) -> AutonomousSupervisorRunResult:
         completed_at = datetime.now(timezone.utc)
         return AutonomousSupervisorRunResult(
@@ -383,6 +427,7 @@ class AutonomousSupervisorService:
             risk_summaries=[record.risk_summary for record in records if record.risk_summary],
             cycles=records,
             safety_flags=_safety_flags(self.settings),
+            readiness_report=readiness_report,
         )
 
     def _export_result_if_requested(self, config: AutonomousSupervisorConfig, result: AutonomousSupervisorRunResult) -> list[Path]:
@@ -391,6 +436,10 @@ class AutonomousSupervisorService:
             paths.append(export_autonomous_supervisor_json(result, config.reports_dir))
         if config.export_txt:
             paths.append(export_autonomous_supervisor_txt(result, config.reports_dir))
+        if result.readiness_report is not None and config.export_readiness_json:
+            paths.append(export_autonomous_readiness_json(result.readiness_report, config.reports_dir))
+        if result.readiness_report is not None and config.export_readiness_txt:
+            paths.append(export_autonomous_readiness_txt(result.readiness_report, config.reports_dir))
         return paths
 
     def _sleep(self, seconds: float) -> None:
