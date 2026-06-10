@@ -128,3 +128,27 @@ python scripts/autonomous_evidence_builder.py --mode read-only --include-readine
 Supported modes are `dry-run`, `read-only`, and `refresh`. The default is conservative read-only operation against local report artifacts. Generated evidence includes session health, data health, failure diagnostics, signal anomaly detection, and a static/no-MT5 symbol mapping audit. Missing required evidence blocks paper autonomy through the readiness gate; optional evidence produces warnings or skips.
 
 This remains diagnostic-only. It does not authorize live trading, does not enable broker-live execution, does not require MT5 in CI, and does not call `order_send`.
+
+## Autonomous Recovery Planner
+
+The paper/demo autonomy pipeline now includes a recovery planning layer:
+
+```text
+Evidence Builder -> Readiness Gate -> Recovery Planner -> Autonomous Supervisor -> Audit Reports
+```
+
+The Recovery Planner explains blocked or degraded evidence/readiness/supervisor states and recommends safe next steps. It does not bypass readiness, enable live trading, mutate `.env`, or run broker-live actions.
+
+Plan-only recovery report:
+
+```bash
+python scripts/autonomous_recovery_planner.py --export-json --export-txt
+```
+
+Generate recovery guidance when supervisor readiness blocks:
+
+```bash
+python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --dry-run --build-evidence-first --evidence-mode read-only --readiness-only --plan-recovery-on-block --export-recovery-json --export-recovery-txt
+```
+
+See [`docs/autonomous_recovery_planner.md`](docs/autonomous_recovery_planner.md).

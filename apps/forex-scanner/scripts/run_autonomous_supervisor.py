@@ -68,6 +68,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reports-dir", default="reports", help="Report directory. Default: apps/forex-scanner/reports.")
     parser.add_argument("--build-evidence-first", action="store_true", help="Run Autonomous Evidence Builder before readiness gate evaluation.")
     parser.add_argument("--evidence-mode", default="read-only", choices=["dry-run", "read-only", "refresh"], help="Evidence builder mode used with --build-evidence-first.")
+    parser.add_argument("--plan-recovery-on-block", action="store_true", help="Generate a safe recovery plan when evidence/readiness blocks supervisor cycles.")
+    parser.add_argument("--export-recovery-json", action="store_true", help="Write reports/autonomous_recovery_plan.json when a recovery plan is generated.")
+    parser.add_argument("--export-recovery-txt", action="store_true", help="Write reports/autonomous_recovery_plan.txt when a recovery plan is generated.")
     return parser.parse_args()
 
 
@@ -98,6 +101,9 @@ def main() -> int:
         export_readiness_txt=args.export_readiness_txt,
         build_evidence_first=args.build_evidence_first,
         evidence_mode=args.evidence_mode,
+        plan_recovery_on_block=args.plan_recovery_on_block,
+        export_recovery_json=args.export_recovery_json,
+        export_recovery_txt=args.export_recovery_txt,
     )
     service = AutonomousSupervisorService(settings, provider, database)
     result = service.run_once(config) if args.once else service.run_loop(config)
@@ -128,6 +134,10 @@ def main() -> int:
             print(f"readiness_block={reason}")
         for reason in result.readiness_report.warning_reasons:
             print(f"readiness_warning={reason}")
+    if result.recovery_plan is not None:
+        print(f"recovery_plan={result.recovery_plan.final_status.value} causes={len(result.recovery_plan.causes)} actions={len(result.recovery_plan.actions)}")
+        if result.recovery_plan.next_recommended_command:
+            print(f"recovery_next={result.recovery_plan.next_recommended_command}")
     for path in result.export_paths:
         print(f"report={path}")
     if result.final_status == AutonomousSupervisorFinalStatus.STOPPED_BY_FAILURES:

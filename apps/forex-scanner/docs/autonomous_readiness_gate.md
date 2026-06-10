@@ -110,3 +110,19 @@ Evidence Builder -> Readiness Gate -> Autonomous Supervisor -> Reports/Audit
 ```
 
 The readiness gate remains conservative: missing required evidence, stale evidence, poor data health, failing session health, or blocking failure diagnostics can prevent paper autonomy. Optional evidence such as anomaly detection and static MT5 symbol mapping contributes warnings without requiring MT5 in CI. This still does not authorize live trading or broker execution.
+
+## Recovery planning on readiness block
+
+When readiness is blocked, the next safe step is recovery planning rather than supervisor execution:
+
+```text
+Evidence Builder -> Readiness Gate -> Recovery Planner -> Autonomous Supervisor -> Audit Reports
+```
+
+Generate a plan alongside a blocked readiness report with:
+
+```bash
+python scripts/autonomous_readiness_report.py --build-evidence-first --evidence-mode read-only --plan-recovery-on-block --export-recovery-json --export-recovery-txt
+```
+
+The Recovery Planner reads readiness/evidence/report artifacts, classifies blocker causes, and recommends bounded dry-run/read-only diagnostics or manual reviews. It never changes readiness status itself and never bypasses the gate.
