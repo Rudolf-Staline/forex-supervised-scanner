@@ -79,8 +79,16 @@ Si MetaTrader5 Python package ou terminal MT5 n'est pas disponible, les tests ma
 Cela évite de casser la CI cloud tout en conservant les validations MT5 sur machine locale Windows.
 ## Autonomous Supervisor v0
 
-Autonomous Supervisor v0 is a bounded foreground runner for paper/demo operation only. It enforces the paper safety lock, runs the existing demo bot for simulated paper orders, writes auditable reports, and never starts a hidden daemon or submits broker/MT5 orders. See [`docs/autonomous_supervisor.md`](docs/autonomous_supervisor.md).
+Autonomous Supervisor v0 is a bounded foreground runner for paper/demo operation only. The canonical implementation is `app/execution/autonomous_supervisor.py`; `app/supervisor/autonomous.py` is only a compatibility re-export. It enforces `ensure_demo_bot_safe_mode(...)`, runs the existing demo bot for simulated paper orders, writes auditable reports, never starts a hidden daemon or unbounded loop, and never submits broker/MT5 orders. See [`docs/autonomous_supervisor.md`](docs/autonomous_supervisor.md).
+
+Safe dry-run validation with synthetic data:
 
 ```bash
-python scripts/run_autonomous_supervisor.py --provider synthetic --symbols EUR/USD GBP/USD --cycles 1
+python scripts/run_autonomous_supervisor.py --provider synthetic --once --symbols EUR/USD GBP/USD --dry-run --export-json --export-txt
+```
+
+Bounded paper/demo mode remains paper-only and still does not authorize live trading:
+
+```bash
+python scripts/run_autonomous_supervisor.py --provider synthetic --enabled --no-dry-run --max-cycles 1 --interval-seconds 0 --symbols EUR/USD
 ```

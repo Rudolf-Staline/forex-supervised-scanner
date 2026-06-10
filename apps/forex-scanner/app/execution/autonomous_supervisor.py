@@ -168,11 +168,17 @@ class AutonomousSupervisorRunResult(BaseModel):
     dry_run: bool
     final_status: AutonomousSupervisorFinalStatus
     stop_reason: str | None = None
-    paper_orders_created: int = 0
+    orders_created: int = 0
     risk_summaries: list[dict[str, object]] = Field(default_factory=list)
     cycles: list[AutonomousSupervisorCycleRecord] = Field(default_factory=list)
     safety_flags: dict[str, object] = Field(default_factory=dict)
     export_paths: list[str] = Field(default_factory=list)
+
+    @property
+    def paper_orders_created(self) -> int:
+        """Backward-compatible alias for callers from early v0 prototypes."""
+
+        return self.orders_created
 
 
 class AutonomousSupervisorService:
@@ -373,7 +379,7 @@ class AutonomousSupervisorService:
             dry_run=config.dry_run or not config.enabled,
             final_status=final_status,
             stop_reason=stop_reason,
-            paper_orders_created=sum(record.paper_orders_created for record in records),
+            orders_created=sum(record.paper_orders_created for record in records),
             risk_summaries=[record.risk_summary for record in records if record.risk_summary],
             cycles=records,
             safety_flags=_safety_flags(self.settings),
@@ -495,7 +501,7 @@ def _format_txt_report(result: AutonomousSupervisorRunResult) -> str:
         f"dry_run: {str(result.dry_run).lower()}",
         f"final_status: {result.final_status.value}",
         f"stop_reason: {result.stop_reason or '-'}",
-        f"paper orders created: {result.paper_orders_created}",
+        f"orders_created: {result.orders_created}",
         "",
         "Safety flags proving live execution was not allowed:",
     ]

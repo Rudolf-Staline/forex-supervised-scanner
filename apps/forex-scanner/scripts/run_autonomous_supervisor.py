@@ -43,12 +43,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--symbols", nargs="+", default=["EUR/USD", "GBP/USD", "USD/CHF"], help="Symbols to scan. Ignored when --watchlist is supplied.")
     parser.add_argument("--watchlist", choices=watchlist_names(), default=None, help="Named paper/demo watchlist to scan.")
     parser.add_argument("--once", action="store_true", help="Run one bounded cycle regardless of --max-cycles.")
-    parser.add_argument("--max-cycles", type=int, default=None, help="Maximum foreground cycles. Conservative default: 3.")
+    parser.add_argument("--max-cycles", "--cycles", dest="max_cycles", type=int, default=None, help="Maximum foreground cycles. Conservative default: 3. --cycles is a backward-compatible alias.")
     parser.add_argument("--interval-seconds", type=float, default=None, help="Seconds between cycles. Conservative default: 300.")
     parser.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=None, help="Validate without creating paper orders. Conservative default: true.")
     parser.add_argument("--enabled", action=argparse.BooleanOptionalAction, default=None, help="Explicitly enable bounded paper/demo cycles. Conservative default: false.")
     parser.add_argument("--export-json", action="store_true", help="Write reports/autonomous_supervisor_summary.json.")
     parser.add_argument("--export-txt", action="store_true", help="Write reports/autonomous_supervisor_report.txt.")
+    parser.add_argument("--no-export", action="store_true", help="Backward-compatible no-op alias; exports remain opt-in unless --export-json/--export-txt are provided.")
+    parser.add_argument("--no-sleep", action="store_true", help="Backward-compatible alias that sets --interval-seconds 0 for bounded loops.")
     parser.add_argument("--reports-dir", default="reports", help="Report directory. Default: apps/forex-scanner/reports.")
     return parser.parse_args()
 
@@ -68,10 +70,10 @@ def main() -> int:
         symbols=args.symbols,
         watchlist=args.watchlist,
         max_cycles=1 if args.once else args.max_cycles,
-        interval_seconds=args.interval_seconds,
+        interval_seconds=0 if args.no_sleep else args.interval_seconds,
         dry_run=args.dry_run,
-        export_json=args.export_json,
-        export_txt=args.export_txt,
+        export_json=False if args.no_export else args.export_json,
+        export_txt=False if args.no_export else args.export_txt,
         reports_dir=Path(args.reports_dir),
     )
     service = AutonomousSupervisorService(settings, provider, database)
@@ -79,7 +81,7 @@ def main() -> int:
     print(
         "autonomous_supervisor="
         f"{result.final_status.value} run_id={result.run_id} cycles={result.cycle_count}/{config.max_cycles} "
-        f"paper_orders_created={result.paper_orders_created} dry_run={str(result.dry_run).lower()} "
+        f"orders_created={result.orders_created} dry_run={str(result.dry_run).lower()} "
         f"stop_reason={result.stop_reason or '-'}"
     )
     print("safety=paper_demo_only live_execution_allowed=false broker_order_submission_allowed=false")
