@@ -224,6 +224,19 @@ class DemoBotSettings(BaseModel):
         return self
 
 
+
+
+class AutonomousSupervisorSettings(BaseModel):
+    """Conservative defaults for Autonomous Supervisor v0 paper/demo runs."""
+
+    enabled: bool = False
+    max_cycles: int = Field(default=3, ge=1, le=100)
+    interval_seconds: int = Field(default=300, ge=0, le=86_400)
+    dry_run: bool = True
+    max_consecutive_failures: int = Field(default=2, ge=1, le=25)
+    max_zero_order_cycles: int = Field(default=3, ge=1, le=100)
+
+
 class PortfolioRiskSettings(BaseModel):
     """Optional portfolio/session guardrails applied before paper execution."""
 
@@ -778,6 +791,7 @@ class AppSettings(BaseModel):
     execution_capabilities: ExecutionCapabilitySettings = Field(default_factory=ExecutionCapabilitySettings)
     safety: SafetySettings = Field(default_factory=SafetySettings)
     demo_bot: DemoBotSettings = Field(default_factory=DemoBotSettings)
+    autonomous_supervisor: AutonomousSupervisorSettings = Field(default_factory=AutonomousSupervisorSettings)
     portfolio_risk: PortfolioRiskSettings = Field(default_factory=PortfolioRiskSettings)
     pre_live_validation: PreLiveValidationSettings = Field(default_factory=PreLiveValidationSettings)
     broker: BrokerSettings = Field(default_factory=BrokerSettings)
