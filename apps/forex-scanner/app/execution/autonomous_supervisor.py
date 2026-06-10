@@ -25,6 +25,13 @@ from app.config.watchlists import get_watchlist
 from app.core.types import TradingStyle
 from app.data.providers import MarketDataProvider
 from app.execution.demo_bot import DemoBotCycleResult, DemoBotService
+from app.execution.autonomous_evidence import (
+    AutonomousEvidenceConfig,
+    AutonomousEvidenceFinalStatus,
+    AutonomousEvidenceMode,
+    AutonomousEvidenceReport,
+    build_evidence,
+)
 from app.execution.autonomous_readiness import (
     AutonomousReadinessConfig,
     AutonomousReadinessFinalStatus,
@@ -91,6 +98,8 @@ class AutonomousSupervisorConfig(BaseModel):
     readiness_only: bool = False
     export_readiness_json: bool = False
     export_readiness_txt: bool = False
+    build_evidence_first: bool = False
+    evidence_mode: AutonomousEvidenceMode = AutonomousEvidenceMode.READ_ONLY
 
     @field_validator("symbols")
     @classmethod
@@ -99,6 +108,13 @@ class AutonomousSupervisorConfig(BaseModel):
         if not symbols:
             raise ValueError("at least one symbol is required")
         return symbols
+
+    @field_validator("evidence_mode", mode="before")
+    @classmethod
+    def normalize_evidence_mode(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().replace("-", "_")
+        return value
 
     @classmethod
     def from_environment(cls, **overrides: object) -> "AutonomousSupervisorConfig":
@@ -187,6 +203,7 @@ class AutonomousSupervisorRunResult(BaseModel):
     safety_flags: dict[str, object] = Field(default_factory=dict)
     export_paths: list[str] = Field(default_factory=list)
     readiness_report: AutonomousReadinessReport | None = None
+    evidence_report: AutonomousEvidenceReport | None = None
 
     @property
     def paper_orders_created(self) -> int:
@@ -229,11 +246,33 @@ class AutonomousSupervisorService:
         stop_reason: str | None = None
 
         readiness_report: AutonomousReadinessReport | None = None
+        evidence_report: AutonomousEvidenceReport | None = None
+        if selected.build_evidence_first:
+            evidence_report = build_evidence(
+                settings=self.settings,
+                database=self.database,
+                config=AutonomousEvidenceConfig(
+                    reports_dir=selected.reports_dir,
+                    mode=selected.evidence_mode,
+                    watchlist=selected.watchlist or "multi_asset_demo",
+                    symbols=symbols,
+                    include_readiness=False,
+                    export_json=selected.export_json or selected.export_readiness_json,
+                    export_txt=selected.export_txt or selected.export_readiness_txt,
+                    fail_fast=True,
+                ),
+            )
+            if evidence_report.final_status == AutonomousEvidenceFinalStatus.BLOCKED_EVIDENCE and not selected.dry_run:
+                final_status = AutonomousSupervisorFinalStatus.BLOCKED_BY_READINESS
+                stop_reason = "; ".join(evidence_report.blocking_failures) or "evidence builder reported blocking failures"
+                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report)
+                result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
+                return result
         if selected.skip_readiness_gate:
             if not selected.dry_run:
                 final_status = AutonomousSupervisorFinalStatus.BLOCKED_BY_READINESS
                 stop_reason = "--skip-readiness-gate is diagnostic-only and is allowed only with dry_run=true"
-                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report)
+                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report)
                 result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
                 return result
         else:
@@ -245,7 +284,7 @@ class AutonomousSupervisorService:
             if selected.readiness_only:
                 final_status = AutonomousSupervisorFinalStatus.DRY_RUN if readiness_report.dry_run_allowed else AutonomousSupervisorFinalStatus.BLOCKED_BY_READINESS
                 stop_reason = f"readiness-only check completed with {readiness_report.final_status.value}"
-                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report)
+                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report)
                 result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
                 return result
             if readiness_report.final_status == AutonomousReadinessFinalStatus.WARN_READY and selected.dry_run and readiness_report.dry_run_allowed:
@@ -253,7 +292,7 @@ class AutonomousSupervisorService:
             elif not readiness_report.paper_run_allowed:
                 final_status = AutonomousSupervisorFinalStatus.BLOCKED_BY_READINESS
                 stop_reason = "; ".join(readiness_report.blocking_reasons or readiness_report.warning_reasons) or readiness_report.final_status.value
-                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report)
+                result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report)
                 result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
                 return result
 
@@ -262,7 +301,7 @@ class AutonomousSupervisorService:
             stop_reason = "AUTONOMOUS_SUPERVISOR_ENABLED is false; paper/demo dry-run validation only"
             record = self._dry_run_record(selected, symbols, 1, [stop_reason])
             records.append(record)
-            result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report)
+            result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report)
             result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
             return result
 
@@ -316,7 +355,7 @@ class AutonomousSupervisorService:
                 stop_reason = f"completed bounded max_cycles={selected.max_cycles} dry-run validation"
             else:
                 stop_reason = f"completed bounded max_cycles={selected.max_cycles} paper/demo run"
-        result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report)
+        result = self._build_result(selected, state, records, final_status, stop_reason, symbols, readiness_report, evidence_report)
         result.export_paths = [str(path) for path in self._export_result_if_requested(selected, result)]
         return result
 
@@ -410,6 +449,7 @@ class AutonomousSupervisorService:
         stop_reason: str | None,
         symbols: list[str],
         readiness_report: AutonomousReadinessReport | None = None,
+        evidence_report: AutonomousEvidenceReport | None = None,
     ) -> AutonomousSupervisorRunResult:
         completed_at = datetime.now(timezone.utc)
         return AutonomousSupervisorRunResult(
@@ -428,10 +468,13 @@ class AutonomousSupervisorService:
             cycles=records,
             safety_flags=_safety_flags(self.settings),
             readiness_report=readiness_report,
+            evidence_report=evidence_report,
         )
 
     def _export_result_if_requested(self, config: AutonomousSupervisorConfig, result: AutonomousSupervisorRunResult) -> list[Path]:
         paths: list[Path] = []
+        if result.evidence_report is not None:
+            paths.extend(Path(path) for path in result.evidence_report.output_paths)
         if config.export_json:
             paths.append(export_autonomous_supervisor_json(result, config.reports_dir))
         if config.export_txt:

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from app.config.env import load_dotenv
 from app.config.settings import load_settings
+from app.execution.autonomous_evidence import AutonomousEvidenceConfig, build_evidence
 from app.execution.autonomous_readiness import (
     AutonomousReadinessConfig,
     build_readiness_report,
@@ -33,6 +34,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=True, help="Evaluate dry-run allowance. Default: true.")
     parser.add_argument("--export-json", action="store_true", help="Write reports/autonomous_readiness_report.json.")
     parser.add_argument("--export-txt", action="store_true", help="Write reports/autonomous_readiness_report.txt.")
+    parser.add_argument("--build-evidence-first", action="store_true", help="Run the read-only evidence builder before readiness evaluation.")
+    parser.add_argument("--evidence-mode", default="read-only", choices=["dry-run", "read-only", "refresh"], help="Evidence builder mode used with --build-evidence-first.")
     return parser.parse_args()
 
 
@@ -43,6 +46,21 @@ def main() -> int:
     configure_logging()
     settings = load_settings().model_copy(deep=True)
     database = Database(settings.database_absolute_path)
+    if args.build_evidence_first:
+        evidence_report = build_evidence(
+            settings=settings,
+            database=database,
+            config=AutonomousEvidenceConfig(
+                reports_dir=Path(args.reports_dir),
+                mode=args.evidence_mode,
+                include_readiness=False,
+                export_json=args.export_json,
+                export_txt=args.export_txt,
+            ),
+        )
+        print(f"autonomous_evidence={evidence_report.final_status.value}")
+        for reason in evidence_report.blocking_failures:
+            print(f"evidence_block={reason}")
     config = AutonomousReadinessConfig.from_environment(reports_dir=Path(args.reports_dir), dry_run=args.dry_run)
     report = build_readiness_report(settings, database, config)
     print(f"autonomous_readiness={report.final_status.value}")
