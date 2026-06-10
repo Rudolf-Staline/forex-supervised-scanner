@@ -184,6 +184,14 @@
     "cooldown_minutes": 30.0,
     "min_rr": 1.5
   },
+  "autonomous_supervisor": {
+    "enabled": false,
+    "max_cycles": 3,
+    "interval_seconds": 300,
+    "dry_run": true,
+    "max_consecutive_failures": 2,
+    "max_zero_order_cycles": 3
+  },
   "broker": {
     "provider": "mt5",
     "sandbox_enabled": true,

@@ -46,6 +46,7 @@ jobs:
           import sys
 
           tests = [
+              "tests/test_autonomous_supervisor.py",
               "tests/test_safety.py",
               "tests/test_demo_bot.py",
               "tests/test_multi_asset_safety.py",
