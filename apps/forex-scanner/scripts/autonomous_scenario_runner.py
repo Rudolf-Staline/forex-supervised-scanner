@@ -45,7 +45,12 @@ def main() -> int:
     if args.list:
         print(f"total scenarios: {len(scenarios)}")
         for scenario in scenarios:
-            print(f"- {scenario.scenario_id}: {scenario.title} [{scenario.mode.value}] action={scenario.action}")
+            print(
+                f"- {scenario.scenario_id}: {scenario.title} [{scenario.mode.value}] "
+                f"action={scenario.action} expected={scenario.expected.policy_decision.value} "
+                f"supervisor={scenario.expected.supervisor_behavior.value} "
+                f"recovery={scenario.expected.recovery_behavior.value}"
+            )
         return 0
 
     if args.scenario:
@@ -75,6 +80,7 @@ def main() -> int:
 
     failed = [result.scenario_id for result in suite.scenario_results if result.status.value == "FAIL"]
     print(f"total scenarios: {suite.scenarios_total}")
+    print("scenario ids: " + ", ".join(suite.scenario_ids))
     print(f"passed: {suite.scenarios_passed}")
     print(f"failed: {suite.scenarios_failed}")
     print(f"warned: {suite.scenarios_warned}")

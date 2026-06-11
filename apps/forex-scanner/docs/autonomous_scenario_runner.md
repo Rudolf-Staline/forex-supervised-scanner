@@ -44,7 +44,7 @@ The built-in suite covers dry-run evidence gaps, PAPER readiness/evidence blocks
 | `order_send_path_always_denied` | Order-submission path | Always denied |
 | `supervisor_dry_run_diagnostic_allowed` | Diagnostic supervisor dry-run | Diagnostic-only supervisor simulation |
 
-List scenarios:
+List scenarios with their expected policy, supervisor, and recovery outcomes:
 
 ```bash
 python scripts/autonomous_scenario_runner.py --list
@@ -77,9 +77,9 @@ The default exports are:
 - `reports/autonomous_scenario_suite.json`
 - `reports/autonomous_scenario_suite.txt`
 
-The JSON report includes generation time, final suite status, counts for passed/failed/warned/skipped scenarios, scenario results, safety flags, optional policy decisions, optional recovery plans, and output paths.
+The JSON report includes generation time, final suite status, the exact ordered `scenario_ids` that were evaluated, counts for passed/failed/warned/skipped scenarios, scenario results, safety flags, optional policy decisions, optional recovery plans, runner options, and output paths. Runner options are JSON-safe and record `reports_dir`, `strict`, `fail_fast`, `include_policy_report`, and `include_recovery_plan` so CI artifacts show how the suite was invoked.
 
-Each scenario result includes expected vs. actual policy decision, expected vs. actual supervisor behavior, expected vs. actual recovery behavior, mismatches, warnings, blocking reasons, and paths to synthetic reports. The runner compares expected blocking reasons only against actual blocking reasons and compares expected warnings only against actual warnings, so safety denials and warn-allow diagnostics cannot accidentally satisfy each other.
+Each scenario result includes expected vs. actual policy decision, expected vs. actual supervisor behavior, expected vs. actual recovery behavior, mismatches, warnings, blocking reasons, and paths to synthetic reports. The text report also prints the ordered scenario IDs before the per-scenario comparison table. The runner compares expected blocking reasons only against actual blocking reasons and compares expected warnings only against actual warnings, so safety denials and warn-allow diagnostics cannot accidentally satisfy each other.
 
 ## Interpreting results
 
