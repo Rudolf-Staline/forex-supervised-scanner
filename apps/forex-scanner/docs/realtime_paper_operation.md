@@ -44,7 +44,7 @@ The supervisor writes:
 - `reports/realtime_paper_supervisor_report.txt`
 - `reports/realtime_heartbeat.jsonl`
 
-The supervisor JSON/TXT summary includes `evidence_status`; heartbeat entries include per-cycle `evidence_status` so operators can prove evidence ran before readiness and policy allowed paper-only supervision.
+The supervisor JSON/TXT summary includes `evidence_status`; heartbeat entries include per-cycle `evidence_status`, `heartbeat_sequence`, `runtime_safety_heartbeat`, `paper_demo_only`, and `live_execution_allowed=false` so operators can prove evidence ran before readiness and policy allowed paper-only supervision without live execution.
 
 ## Safety environment
 
