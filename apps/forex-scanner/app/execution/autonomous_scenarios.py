@@ -140,6 +140,24 @@ class AutonomousScenarioSuiteResult(BaseModel):
 
 _FORBIDDEN_ACTION_TOKENS = ("live_trading", "broker_live", "order_send", "mt5_order")
 
+BUILTIN_AUTONOMOUS_SCENARIO_IDS = (
+    "dry_run_missing_evidence_warn_allowed",
+    "paper_missing_evidence_denied",
+    "stale_evidence_denied",
+    "healthy_readiness_paper_allowed",
+    "maintenance_mode_denied",
+    "degraded_mode_denied",
+    "failure_diagnostics_blocked_recovery_recommended",
+    "signal_anomaly_blocked_recovery_recommended",
+    "skip_readiness_dry_run_allowed",
+    "skip_readiness_paper_denied",
+    "recovery_manual_action_not_auto_executed",
+    "live_trading_always_denied",
+    "broker_live_always_denied",
+    "order_send_path_always_denied",
+    "supervisor_dry_run_diagnostic_allowed",
+)
+
 
 def load_builtin_scenarios() -> list[AutonomousScenarioInput]:
     """Return built-in cloud-safe scenario definitions."""

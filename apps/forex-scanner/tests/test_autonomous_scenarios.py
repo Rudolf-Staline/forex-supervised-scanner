@@ -8,6 +8,7 @@ from pathlib import Path
 
 from app.execution.autonomous_policy import AutonomousPolicyDecisionType
 from app.execution.autonomous_scenarios import (
+    BUILTIN_AUTONOMOUS_SCENARIO_IDS,
     AutonomousScenarioConfig,
     AutonomousScenarioRunnerService,
     AutonomousScenarioStatus,
@@ -23,13 +24,9 @@ def _scenario(scenario_id: str):
 
 def test_builtin_scenario_list_loads():
     scenarios = load_builtin_scenarios()
-    assert len(scenarios) >= 15
-    assert {s.scenario_id for s in scenarios} >= {
-        "dry_run_missing_evidence_warn_allowed",
-        "paper_missing_evidence_denied",
-        "live_trading_always_denied",
-        "supervisor_dry_run_diagnostic_allowed",
-    }
+    scenario_ids = [s.scenario_id for s in scenarios]
+    assert scenario_ids == list(BUILTIN_AUTONOMOUS_SCENARIO_IDS)
+    assert len(scenario_ids) == len(set(scenario_ids))
 
 
 def test_every_builtin_scenario_has_required_fields():
