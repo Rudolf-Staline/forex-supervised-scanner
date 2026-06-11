@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Run a bounded foreground realtime paper supervisor."""
+"""Update local realtime paper positions from fresh market candles."""
 
 from __future__ import annotations
 
@@ -17,11 +17,12 @@ from app.config.settings import load_settings
 from app.config.watchlists import watchlist_names
 from app.core.types import Timeframe
 from app.data.providers import build_provider
-from app.execution.realtime_paper_supervisor import RealtimePaperSupervisorConfig, RealtimePaperSupervisorService, symbols_from_args
+from app.execution.realtime_paper_positions import RealtimePaperPositionConfig, RealtimePaperPositionManagerService
+from app.execution.realtime_paper_supervisor import symbols_from_args
 from app.storage.database import Database
 from app.utils.logging import configure_logging
 
-SAFETY_BANNER = "SAFETY: realtime paper supervisor is bounded and paper/demo only; no live trading, no order_send."
+SAFETY_BANNER = "SAFETY: realtime paper positions are local paper/demo only; no live trading, no order_send."
 
 
 def _install_safe_defaults() -> None:
@@ -32,25 +33,18 @@ def _install_safe_defaults() -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Bounded realtime paper/demo supervisor.")
+    parser = argparse.ArgumentParser(description="Manage local realtime paper position lifecycle.")
     parser.add_argument("--provider", choices=["synthetic", "yahoo", "mt5", "auto"], default="auto")
     parser.add_argument("--symbols", nargs="+", default=None)
     parser.add_argument("--watchlist", choices=watchlist_names(), default=None)
     parser.add_argument("--timeframe", choices=[item.value for item in Timeframe], default=Timeframe.M1.value)
-    parser.add_argument("--interval-seconds", type=float, default=60.0)
-    parser.add_argument("--max-cycles", type=int, default=5)
-    parser.add_argument("--max-runtime-minutes", type=float, default=None)
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--build-evidence-first", action="store_true")
-    parser.add_argument("--plan-recovery-on-block", action="store_true")
-    parser.add_argument("--manage-positions", action="store_true", help="Update local paper position lifecycle after health/safety checks.")
     parser.add_argument("--export-json", action="store_true")
     parser.add_argument("--export-txt", action="store_true")
     parser.add_argument("--reports-dir", default="reports")
-    parser.add_argument("--max-data-age-seconds", type=float, default=None, help="Override the stale-candle cutoff for realtime data.")
-    parser.add_argument("--min-data-quality-score", type=float, default=75.0, help="Block below this data quality score.")
-    parser.add_argument("--warn-data-quality-score", type=float, default=90.0, help="Warn below this data quality score when not blocked.")
-    parser.add_argument("--max-spread-atr-ratio", type=float, default=0.25, help="Block when latest spread divided by ATR exceeds this ratio.")
+    parser.add_argument("--max-data-age-seconds", type=float, default=None)
+    parser.add_argument("--max-spread-atr-ratio", type=float, default=0.25)
+    parser.add_argument("--block-on-wide-spread", action="store_true")
     return parser.parse_args()
 
 
@@ -64,34 +58,28 @@ def main() -> int:
     settings.provider.name = args.provider
     provider = build_provider(settings)
     database = Database(settings.database_absolute_path)
-    config = RealtimePaperSupervisorConfig(
+    config = RealtimePaperPositionConfig(
         provider=args.provider,
         symbols=symbols_from_args(args.symbols, args.watchlist),
-        watchlist=args.watchlist,
         timeframe=Timeframe(args.timeframe),
-        interval_seconds=args.interval_seconds,
-        max_cycles=args.max_cycles,
-        max_runtime_minutes=args.max_runtime_minutes,
         dry_run=args.dry_run,
-        build_evidence_first=args.build_evidence_first,
-        plan_recovery_on_block=args.plan_recovery_on_block,
-        manage_positions=args.manage_positions,
         export_json=args.export_json,
         export_txt=args.export_txt,
         reports_dir=Path(args.reports_dir),
-        max_data_age_seconds=args.max_data_age_seconds,
-        min_data_quality_score=args.min_data_quality_score,
-        warn_data_quality_score=args.warn_data_quality_score,
+        max_age_seconds=args.max_data_age_seconds,
         max_spread_atr_ratio=args.max_spread_atr_ratio,
+        block_on_wide_spread=args.block_on_wide_spread,
     )
-    report = RealtimePaperSupervisorService(settings, provider, database).run(config)
+    report = RealtimePaperPositionManagerService(settings, provider, database).evaluate_position_lifecycle(config)
     print(
-        "realtime_paper_supervisor="
-        f"{report.stop_reason} cycles={report.cycles_attempted}/{config.max_cycles} "
-        f"orders={report.paper_orders_created} positions_updated={report.positions_updated} positions_closed={report.positions_closed} data_health={report.data_health_status} "
-        f"evidence={report.evidence_status} readiness={report.readiness_status}"
+        "realtime_paper_positions=completed "
+        f"positions_seen={report.positions_seen} pending_orders_seen={report.pending_orders_seen} "
+        f"positions_updated={report.positions_updated} positions_closed={report.positions_closed} "
+        f"partials={report.partial_exits_created} breakeven_moves={report.breakeven_moves}"
     )
     print("safety=paper_demo_only live_execution_allowed=false broker_order_submission_allowed=false order_send_called=false")
+    for warning in report.warnings:
+        print(f"warning={warning}")
     for reason in report.blocking_reasons:
         print(f"block={reason}")
     for key, path in report.output_paths.items():

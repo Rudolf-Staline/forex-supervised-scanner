@@ -268,10 +268,10 @@ class OrderRequest(BaseModel):
     def ensure_executable_direction_and_levels(self) -> "OrderRequest":
         if self.direction not in {DirectionBias.LONG, DirectionBias.SHORT}:
             raise ValueError("paper execution requires a long or short direction")
-        if self.direction == DirectionBias.LONG and not (self.stop_loss < self.entry_price < self.take_profit):
-            raise ValueError("long order requires stop below entry and target above entry")
-        if self.direction == DirectionBias.SHORT and not (self.take_profit < self.entry_price < self.stop_loss):
-            raise ValueError("short order requires target below entry and stop above entry")
+        if self.direction == DirectionBias.LONG and not (self.stop_loss <= self.entry_price < self.take_profit):
+            raise ValueError("long order requires stop at/below entry and target above entry")
+        if self.direction == DirectionBias.SHORT and not (self.take_profit < self.entry_price <= self.stop_loss):
+            raise ValueError("short order requires target below entry and stop at/above entry")
         return self
 
 

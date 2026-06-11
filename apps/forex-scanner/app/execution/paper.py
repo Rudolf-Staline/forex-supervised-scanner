@@ -384,7 +384,11 @@ def _process_open_order(
     if stop_hit:
         return _fully_closed_order(updated, _adverse_exit_price(updated, updated.request.stop_loss, spread_adjustment), timestamp, CloseReason.STOP_LOSS, _bars_in_trade(updated, bar_offset)), True
 
-    for target_name, target_price, fraction in _target_plan(updated.request, settings):
+    target_plan = _target_plan(updated.request, settings)
+    if not target_plan and _target_touched(updated.request.direction, updated.request.take_profit, high, low):
+        return _fully_closed_order(updated, _adverse_exit_price(updated, updated.request.take_profit, spread_adjustment), timestamp, CloseReason.TAKE_PROFIT, _bars_in_trade(updated, bar_offset)), True
+
+    for target_name, target_price, fraction in target_plan:
         if _target_already_hit(updated, target_name) or not _target_touched(updated.request.direction, target_price, high, low):
             continue
         updated = _apply_partial_exit(updated, target_name, target_price, fraction, timestamp, spread_adjustment)
@@ -445,7 +449,12 @@ def _apply_partial_exit(
 
 def _move_stop_to_breakeven(order: ExecutionOrder, timestamp: datetime) -> ExecutionOrder:
     old_stop = order.request.stop_loss
-    request = order.request.model_copy(update={"stop_loss": order.request.entry_price})
+    entry = order.request.entry_price
+    if order.request.direction == DirectionBias.LONG:
+        entry = min(entry, order.request.take_profit - 1e-9)
+    else:
+        entry = max(entry, order.request.take_profit + 1e-9)
+    request = order.request.model_copy(update={"stop_loss": entry})
     movement = StopMovement(
         timestamp=timestamp,
         from_stop=old_stop,
@@ -542,11 +551,11 @@ def _update_excursions(order: ExecutionOrder, high: float, low: float) -> Execut
     entry = order.simulated_entry or order.request.entry_price
     risk = abs(entry - (order.initial_stop_loss or order.request.stop_loss))
     if order.request.direction == DirectionBias.LONG:
-        mfe = max(order.mfe, (high - entry) / max(risk, 1e-12))
-        mae = max(order.mae, (entry - low) / max(risk, 1e-12))
+        mfe = max(order.mfe, (high - entry) / max(risk, 1e-9))
+        mae = max(order.mae, (entry - low) / max(risk, 1e-9))
     else:
-        mfe = max(order.mfe, (entry - low) / max(risk, 1e-12))
-        mae = max(order.mae, (high - entry) / max(risk, 1e-12))
+        mfe = max(order.mfe, (entry - low) / max(risk, 1e-9))
+        mae = max(order.mae, (high - entry) / max(risk, 1e-9))
     return order.model_copy(update={"mfe": round(max(0.0, mfe), 4), "mae": round(max(0.0, mae), 4)})
 
 
@@ -563,7 +572,7 @@ def _r_multiple(direction: DirectionBias, entry: float, stop_loss: float, exit_p
         gross = exit_price - entry
     else:
         gross = entry - exit_price
-    return gross / max(risk_distance, 1e-12)
+    return gross / max(risk_distance, 1e-9)
 
 
 def _bars_in_trade(order: ExecutionOrder, bar_offset: int) -> int:
