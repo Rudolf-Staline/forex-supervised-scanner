@@ -127,6 +127,7 @@ class AutonomousScenarioSuiteResult(BaseModel):
     generated_at: datetime
     final_status: AutonomousScenarioStatus
     scenarios_total: int
+    scenario_ids: list[str]
     scenarios_passed: int
     scenarios_failed: int
     scenarios_warned: int
@@ -135,6 +136,7 @@ class AutonomousScenarioSuiteResult(BaseModel):
     safety_flags: dict[str, object]
     policy_decisions: dict[str, dict[str, Any]] = Field(default_factory=dict)
     recovery_plans: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    runner_options: dict[str, object] = Field(default_factory=dict)
     output_paths: dict[str, str] = Field(default_factory=dict)
 
 
@@ -468,6 +470,7 @@ class AutonomousScenarioRunnerService:
             generated_at=datetime.now(timezone.utc),
             final_status=final,
             scenarios_total=len(results),
+            scenario_ids=[result.scenario_id for result in results],
             scenarios_passed=counts[AutonomousScenarioStatus.PASS],
             scenarios_failed=counts[AutonomousScenarioStatus.FAIL],
             scenarios_warned=counts[AutonomousScenarioStatus.WARN],
@@ -476,6 +479,7 @@ class AutonomousScenarioRunnerService:
             safety_flags=_suite_safety_flags(),
             policy_decisions=self.policy_decisions if self.config.include_policy_report else {},
             recovery_plans=self.recovery_plans if self.config.include_recovery_plan else {},
+            runner_options=_suite_runner_options(self.config, fail_fast),
             output_paths={},
         )
         return suite
@@ -519,6 +523,7 @@ def format_autonomous_scenario_suite_txt(suite: AutonomousScenarioSuiteResult) -
         f"generated_at: {suite.generated_at.isoformat()}",
         f"final_status: {suite.final_status.value}",
         f"total: {suite.scenarios_total}",
+        "scenario_ids: " + ", ".join(suite.scenario_ids),
         f"passed: {suite.scenarios_passed}",
         f"failed: {suite.scenarios_failed}",
         f"warned: {suite.scenarios_warned}",
@@ -687,6 +692,18 @@ def _synthetic_reports(readiness_status: str, evidence_status: str, operator_con
     if flavor == "stale":
         reports["autonomous_readiness_report.json"]["blocking_reasons"] = ["stale reports block readiness"]
     return reports
+
+
+def _suite_runner_options(config: AutonomousScenarioConfig, fail_fast: bool) -> dict[str, object]:
+    """Return JSON-safe runner options for report traceability."""
+
+    return {
+        "reports_dir": str(config.reports_dir) if config.reports_dir is not None else None,
+        "strict": config.strict,
+        "fail_fast": fail_fast,
+        "include_policy_report": config.include_policy_report,
+        "include_recovery_plan": config.include_recovery_plan,
+    }
 
 
 def _suite_safety_flags() -> dict[str, object]:

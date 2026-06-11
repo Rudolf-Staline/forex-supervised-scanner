@@ -26,6 +26,23 @@ def test_builtin_scenario_list_loads():
     scenarios = load_builtin_scenarios()
     scenario_ids = [s.scenario_id for s in scenarios]
     assert scenario_ids == list(BUILTIN_AUTONOMOUS_SCENARIO_IDS)
+    assert set(scenario_ids) == {
+        "dry_run_missing_evidence_warn_allowed",
+        "paper_missing_evidence_denied",
+        "stale_evidence_denied",
+        "healthy_readiness_paper_allowed",
+        "maintenance_mode_denied",
+        "degraded_mode_denied",
+        "failure_diagnostics_blocked_recovery_recommended",
+        "signal_anomaly_blocked_recovery_recommended",
+        "skip_readiness_dry_run_allowed",
+        "skip_readiness_paper_denied",
+        "recovery_manual_action_not_auto_executed",
+        "live_trading_always_denied",
+        "broker_live_always_denied",
+        "order_send_path_always_denied",
+        "supervisor_dry_run_diagnostic_allowed",
+    }
     assert len(scenario_ids) == len(set(scenario_ids))
 
 
@@ -108,6 +125,7 @@ def test_suite_report_schema_is_stable(tmp_path: Path):
         "generated_at",
         "final_status",
         "scenarios_total",
+        "scenario_ids",
         "scenarios_passed",
         "scenarios_failed",
         "scenarios_warned",
@@ -116,8 +134,13 @@ def test_suite_report_schema_is_stable(tmp_path: Path):
         "safety_flags",
         "policy_decisions",
         "recovery_plans",
+        "runner_options",
         "output_paths",
     }
+    assert payload["scenario_ids"] == list(BUILTIN_AUTONOMOUS_SCENARIO_IDS)
+    assert payload["runner_options"]["strict"] is True
+    assert payload["runner_options"]["include_policy_report"] is True
+    assert payload["runner_options"]["include_recovery_plan"] is True
     first = payload["scenario_results"][0]
     assert set(first) >= {
         "scenario_id",
@@ -152,6 +175,8 @@ def test_cli_list_works():
     )
     assert completed.returncode == 0
     assert "total scenarios:" in completed.stdout
+    assert "expected=DENY" in completed.stdout
+    assert "recovery=RECOMMENDED_NOT_EXECUTED" in completed.stdout
     assert "live trading" in completed.stdout.lower()
 
 
@@ -174,6 +199,7 @@ def test_cli_all_export_json_and_txt_works(tmp_path: Path):
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert "final_status: PASS" in completed.stdout
+    assert "scenario ids: dry_run_missing_evidence_warn_allowed" in completed.stdout
     assert (tmp_path / "autonomous_scenario_suite.json").exists()
     assert (tmp_path / "autonomous_scenario_suite.txt").exists()
 
