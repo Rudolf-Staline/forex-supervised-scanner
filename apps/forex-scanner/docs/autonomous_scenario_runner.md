@@ -79,7 +79,7 @@ The default exports are:
 
 The JSON report includes generation time, final suite status, counts for passed/failed/warned/skipped scenarios, scenario results, safety flags, optional policy decisions, optional recovery plans, and output paths.
 
-Each scenario result includes expected vs. actual policy decision, expected vs. actual supervisor behavior, expected vs. actual recovery behavior, mismatches, warnings, blocking reasons, and paths to synthetic reports.
+Each scenario result includes expected vs. actual policy decision, expected vs. actual supervisor behavior, expected vs. actual recovery behavior, mismatches, warnings, blocking reasons, and paths to synthetic reports. The runner compares expected blocking reasons only against actual blocking reasons and compares expected warnings only against actual warnings, so safety denials and warn-allow diagnostics cannot accidentally satisfy each other.
 
 ## Interpreting results
 

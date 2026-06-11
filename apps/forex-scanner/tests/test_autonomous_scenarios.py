@@ -133,6 +133,15 @@ def test_suite_report_schema_is_stable(tmp_path: Path):
     }
 
 
+def test_text_export_includes_expected_vs_actual_recovery_behavior(tmp_path: Path):
+    service = AutonomousScenarioRunnerService(AutonomousScenarioConfig(reports_dir=tmp_path, strict=True))
+    suite = service.run_scenario_suite([_scenario("paper_missing_evidence_denied")])
+    txt_path = service.export_txt(suite, tmp_path)
+    rendered = txt_path.read_text(encoding="utf-8")
+    assert "expected_recovery_behavior: RECOMMENDED_NOT_EXECUTED" in rendered
+    assert "actual_recovery_behavior: RECOMMENDED_NOT_EXECUTED" in rendered
+
+
 def test_cli_list_works():
     completed = subprocess.run(
         [sys.executable, "scripts/autonomous_scenario_runner.py", "--list"],

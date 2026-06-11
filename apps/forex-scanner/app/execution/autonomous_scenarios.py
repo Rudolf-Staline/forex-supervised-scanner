@@ -532,6 +532,8 @@ def format_autonomous_scenario_suite_txt(suite: AutonomousScenarioSuiteResult) -
             f"  actual_decision: {result.actual_decision}",
             f"  expected_supervisor_behavior: {result.expected_supervisor_behavior}",
             f"  actual_supervisor_behavior: {result.actual_supervisor_behavior}",
+            f"  expected_recovery_behavior: {result.expected_recovery_behavior}",
+            f"  actual_recovery_behavior: {result.actual_recovery_behavior}",
         ])
         if result.mismatches:
             lines.append("  mismatches:")
@@ -606,10 +608,15 @@ def _compare(
         mismatches.append(f"expected supervisor {scenario.expected.supervisor_behavior.value}, got {supervisor.value}")
     if recovery != scenario.expected.recovery_behavior:
         mismatches.append(f"expected recovery {scenario.expected.recovery_behavior.value}, got {recovery.value}")
-    haystack = "\n".join(decision.blocking_reasons + decision.warnings).lower()
+    blocking_haystack = "\n".join(decision.blocking_reasons).lower()
     for expected_reason in scenario.expected.blocking_reasons:
-        if expected_reason.lower() not in haystack:
+        if expected_reason.lower() not in blocking_haystack:
             mismatches.append(f"expected blocking reason containing '{expected_reason}'")
+
+    warning_haystack = "\n".join(decision.warnings).lower()
+    for expected_warning in scenario.expected.warnings:
+        if expected_warning.lower() not in warning_haystack:
+            mismatches.append(f"expected warning containing '{expected_warning}'")
     return mismatches
 
 
