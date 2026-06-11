@@ -88,3 +88,17 @@ python scripts/autonomous_evidence_builder.py --mode read-only --plan-recovery-o
 ```
 
 The recovery plan recommends safe dry-run/read-only diagnostics or manual review actions. It does not bypass readiness and does not authorize live trading.
+
+## Policy Engine Integration
+
+The Evidence Builder now consults the Autonomous Policy Engine via `can_build_evidence()` at the start of each evidence build. The policy engine evaluates safety invariants and domain-specific rules for evidence generation under the current operating mode, returning an `ALLOW`, `WARN_ALLOW`, or `DENY` decision.
+
+If the policy decision is `DENY`, the evidence build is blocked before any tasks execute. If the decision is `WARN_ALLOW`, the build proceeds with warnings included in the output. The policy decision is included in the evidence report under the `policy_decision` field of `reports/autonomous_evidence_summary.json`.
+
+The updated safe autonomy pipeline is:
+
+```text
+Evidence Builder -> Readiness Gate -> Recovery Planner -> [Policy Engine] -> Autonomous Supervisor -> Audit Reports
+```
+
+The policy engine does not change evidence generation behavior. It centralizes the permission check that was previously implicit in mode validation. This remains diagnostic-only and does not authorize live trading. See [`autonomous_policy_engine.md`](autonomous_policy_engine.md).

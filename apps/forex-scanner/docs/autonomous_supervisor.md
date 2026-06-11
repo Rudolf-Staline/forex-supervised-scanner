@@ -201,3 +201,20 @@ python scripts/run_autonomous_supervisor.py --once --symbols EUR/USD --dry-run -
 ```
 
 If recovery is needed, supervisor cycles remain blocked. The recovery summary can be embedded in supervisor output and exported as `reports/autonomous_recovery_plan.json` and `.txt`.
+
+## Policy Engine Integration
+
+The Autonomous Supervisor now consults the Autonomous Policy Engine before starting cycles:
+
+- `can_run_supervisor()` is called before any supervisor invocation to verify that the current mode, readiness status, evidence status, and operator controls permit supervisor execution.
+- `can_skip_readiness_gate()` is called when `--skip-readiness-gate` is requested, enforcing the invariant that readiness bypass is only allowed for dry-run diagnostic modes.
+
+The policy decision is included in the supervisor run result under the `policy_decision` field of `reports/autonomous_supervisor_summary.json`. If the policy decision is `DENY`, supervisor cycles are blocked before any cycle is attempted.
+
+The updated safe autonomy pipeline is:
+
+```text
+Evidence Builder -> Readiness Gate -> Recovery Planner -> [Policy Engine] -> Autonomous Supervisor -> Audit Reports
+```
+
+The policy engine centralizes permission checks that were previously distributed across the supervisor's safety validation. It does not change supervisor execution behavior. This remains paper/demo-only and does not authorize live trading. See [`autonomous_policy_engine.md`](autonomous_policy_engine.md).

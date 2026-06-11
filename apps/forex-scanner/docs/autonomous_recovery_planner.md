@@ -134,3 +134,22 @@ Supervisor cycles are not run to recover readiness. The recovery plan is an audi
 ## Safety guarantees
 
 The planner forbids automatic broker-live actions, terminal order actions, `.env` mutation, credential changes, report deletion, strategy-threshold changes, and safety-gate bypasses. It remains cloud-safe and does not require a local MT5 terminal for tests.
+
+## Policy Engine Integration
+
+The Recovery Planner now consults the Autonomous Policy Engine via `can_execute_recovery_action()` before executing each recovery action. The policy engine evaluates whether the action is safe for automatic execution under the current mode, checking that:
+
+- Plan generation is always allowed.
+- Manual-review actions are always denied for automatic execution.
+- Only explicitly safe dry-run/read-only actions are permitted in safe modes.
+- Recovery can never directly unblock the supervisor or override the readiness gate.
+
+Policy decisions are included in the recovery plan under the `policy_decision` field of `reports/autonomous_recovery_plan.json`. Each executed action's policy result is recorded for auditability.
+
+The updated safe autonomy pipeline is:
+
+```text
+Evidence Builder -> Readiness Gate -> Recovery Planner -> [Policy Engine] -> Autonomous Supervisor -> Audit Reports
+```
+
+The policy engine does not change recovery planning behavior. It centralizes the permission check for action execution that was previously implicit in safe-action classification. This remains diagnostic-only and does not authorize live trading. See [`autonomous_policy_engine.md`](autonomous_policy_engine.md).
