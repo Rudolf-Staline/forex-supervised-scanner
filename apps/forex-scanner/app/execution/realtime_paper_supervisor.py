@@ -365,7 +365,14 @@ class RealtimePaperSupervisorService:
 
     def _write_heartbeat(self, path: Path, run_id: str, record: RealtimeCycleRecord) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = record.model_dump(mode="json") | {"run_id": run_id, "heartbeat_at": self.now_fn().isoformat()}
+        payload = record.model_dump(mode="json") | {
+            "run_id": run_id,
+            "heartbeat_at": self.now_fn().isoformat(),
+            "heartbeat_sequence": record.cycle,
+            "runtime_safety_heartbeat": True,
+            "paper_demo_only": True,
+            "live_execution_allowed": False,
+        }
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, sort_keys=True) + "\n")
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -192,7 +193,13 @@ def test_bounded_max_cycles_respected_and_heartbeat_written(settings, tmp_path: 
     assert report.cycles_completed == 2
     heartbeat = tmp_path / "realtime_heartbeat.jsonl"
     assert heartbeat.exists()
-    assert len(heartbeat.read_text(encoding="utf-8").strip().splitlines()) == 2
+    lines = heartbeat.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 2
+    payload = json.loads(lines[-1])
+    assert payload["heartbeat_sequence"] == 2
+    assert payload["runtime_safety_heartbeat"] is True
+    assert payload["paper_demo_only"] is True
+    assert payload["live_execution_allowed"] is False
 
 
 def test_stale_data_stops(settings, tmp_path: Path, monkeypatch):
