@@ -181,3 +181,21 @@ python scripts/autonomous_scenario_runner.py --all --export-json --export-txt --
 ```
 
 Exports are written to `reports/autonomous_scenario_suite.json` and `reports/autonomous_scenario_suite.txt` by default, or to a test/temp path with `--reports-dir`. The runner is paper/demo/read-only and does not require MT5, network access, broker credentials, `.env` mutation, daemon creation, live trading, broker-live execution, or order submission. See `docs/autonomous_scenario_runner.md` for details.
+
+## Realtime paper/demo readiness layer
+
+Run a one-shot realtime data health check before any realtime paper/demo session:
+
+```bash
+python scripts/realtime_data_check.py --provider mt5 --symbols EUR/USD GBP/USD --timeframe M1 --export-json --export-txt
+```
+
+Run the bounded foreground realtime paper supervisor in dry-run mode:
+
+```bash
+python scripts/realtime_paper_supervisor.py --provider mt5 --symbols EUR/USD --timeframe M1 --interval-seconds 60 --max-cycles 5 --dry-run --export-json --export-txt
+```
+
+Local MT5 validation requires a configured local MetaTrader 5 terminal. CI and cloud tests do not require MT5 and should use mocks or the synthetic CLI smoke path. Synthetic fallback is intentionally blocked for realtime paper mode, so an MT5 failure cannot be silently treated as live-quality market data.
+
+Realtime paper/demo operation is not live trading: it validates real market data, safety gates, readiness, policy, and paper-only supervisor behavior without broker-live execution. This repository still does **not** authorize live trading, does not add broker-live execution, and the realtime paper layer does not call `order_send`.
