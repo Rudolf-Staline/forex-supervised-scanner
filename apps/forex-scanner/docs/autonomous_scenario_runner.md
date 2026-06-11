@@ -24,7 +24,25 @@ Each built-in scenario declares synthetic report inputs, operator controls, read
 
 ## Built-in scenarios
 
-The built-in suite covers dry-run evidence gaps, PAPER readiness/evidence blocks, stale evidence, healthy PAPER readiness, maintenance/degraded operator controls, failure diagnostics, signal anomalies, readiness-skip safety, manual recovery actions, forbidden live/broker/order paths, and diagnostic dry-run supervisor behavior.
+The built-in suite covers dry-run evidence gaps, PAPER readiness/evidence blocks, stale evidence, healthy PAPER readiness, maintenance/degraded operator controls, failure diagnostics, signal anomalies, readiness-skip safety, manual recovery actions, forbidden live/broker/order paths, and diagnostic dry-run supervisor behavior. The scenario IDs are intentionally stable so CI jobs and operator runbooks can execute targeted checks without relying on list ordering.
+
+| Scenario ID | Purpose | Expected safety posture |
+| --- | --- | --- |
+| `dry_run_missing_evidence_warn_allowed` | Missing evidence during dry-run diagnostics | Warn-allow only; dry-run supervisor simulation |
+| `paper_missing_evidence_denied` | Missing evidence during PAPER autonomy | Denied; recovery recommended but not executed |
+| `stale_evidence_denied` | Stale readiness/evidence reports | Denied; recovery recommended but not executed |
+| `healthy_readiness_paper_allowed` | Healthy PAPER readiness and evidence | PAPER supervisor simulation allowed without live execution |
+| `maintenance_mode_denied` | Operator maintenance control | Denied; manual recovery posture |
+| `degraded_mode_denied` | Operator degraded control | Denied; manual recovery posture |
+| `failure_diagnostics_blocked_recovery_recommended` | Failure diagnostics blockers | Denied; recovery recommended but not executed |
+| `signal_anomaly_blocked_recovery_recommended` | Signal anomaly blockers | Denied; recovery recommended but not executed |
+| `skip_readiness_dry_run_allowed` | Readiness skip during dry-run diagnostics | Warn-allow only; no real cycle |
+| `skip_readiness_paper_denied` | Readiness skip during PAPER autonomy | Denied; bypass blocked |
+| `recovery_manual_action_not_auto_executed` | Manual recovery action evaluation | Denied for automatic execution |
+| `live_trading_always_denied` | Live-trading action path | Always denied |
+| `broker_live_always_denied` | Broker-live action path | Always denied |
+| `order_send_path_always_denied` | Order-submission path | Always denied |
+| `supervisor_dry_run_diagnostic_allowed` | Diagnostic supervisor dry-run | Diagnostic-only supervisor simulation |
 
 List scenarios:
 
