@@ -317,6 +317,30 @@ class RealtimePaperSupervisorService:
                 positions_updated += cycle_positions_updated
                 positions_closed += cycle_positions_closed
                 partial_exits_created += cycle_partials
+
+            post_cycle_drift_reasons = realtime_safety_drift_reasons(self.settings)
+            if post_cycle_drift_reasons:
+                stop_reason = RealtimePaperStopReason.BLOCKED_BY_SAFETY_DRIFT.value
+                blocking_reasons.extend(post_cycle_drift_reasons)
+                record = self._record(
+                    cycle_number,
+                    cycle_started,
+                    data_report.status.value,
+                    readiness_status,
+                    policy_label,
+                    stop_reason,
+                    post_cycle_drift_reasons,
+                    controls,
+                    cycle_orders,
+                    evidence_status=evidence_status,
+                    positions_updated=cycle_positions_updated,
+                    positions_closed=cycle_positions_closed,
+                    partial_exits_created=cycle_partials,
+                )
+                self._write_heartbeat(heartbeat_path, run_id, record)
+                cycles.append(record)
+                break
+
             record = self._record(cycle_number, cycle_started, data_report.status.value, readiness_status, policy_label, None, [], controls, cycle_orders, evidence_status=evidence_status, positions_updated=cycle_positions_updated, positions_closed=cycle_positions_closed, partial_exits_created=cycle_partials)
             self._write_heartbeat(heartbeat_path, run_id, record)
             cycles.append(record)
