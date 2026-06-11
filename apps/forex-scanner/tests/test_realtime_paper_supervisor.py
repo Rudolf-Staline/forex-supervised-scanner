@@ -50,8 +50,10 @@ class FakeDataHealth:
     def __init__(self, statuses: list[RealtimeDataHealthStatus]) -> None:
         self.statuses = statuses
         self.calls = 0
+        self.configs = []
 
     def check(self, config):
+        self.configs.append(config)
         status = self.statuses[min(self.calls, len(self.statuses) - 1)]
         self.calls += 1
         safe = status in {RealtimeDataHealthStatus.REALTIME_DATA_READY, RealtimeDataHealthStatus.REALTIME_DATA_WARN}
@@ -200,6 +202,26 @@ def test_bounded_max_cycles_respected_and_heartbeat_written(settings, tmp_path: 
     assert payload["runtime_safety_heartbeat"] is True
     assert payload["paper_demo_only"] is True
     assert payload["live_execution_allowed"] is False
+
+
+def test_data_health_thresholds_are_forwarded(settings, tmp_path: Path, monkeypatch):
+    patch_ready(monkeypatch)
+    health = FakeDataHealth([RealtimeDataHealthStatus.REALTIME_DATA_READY])
+    cfg = config(tmp_path, max_cycles=1).model_copy(
+        update={
+            "max_data_age_seconds": 90.0,
+            "min_data_quality_score": 80.0,
+            "warn_data_quality_score": 92.0,
+            "max_spread_atr_ratio": 0.15,
+        }
+    )
+    service = RealtimePaperSupervisorService(settings, DummyProvider(), DummyDB(), data_health_service=health)
+    report = service.run(cfg)
+    assert report.stop_reason == RealtimePaperStopReason.COMPLETED_MAX_CYCLES.value
+    assert health.configs[0].max_age_seconds == 90.0
+    assert health.configs[0].min_quality_score == 80.0
+    assert health.configs[0].warn_quality_score == 92.0
+    assert health.configs[0].max_spread_atr_ratio == 0.15
 
 
 def test_stale_data_stops(settings, tmp_path: Path, monkeypatch):

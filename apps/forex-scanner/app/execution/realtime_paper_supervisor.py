@@ -71,6 +71,10 @@ class RealtimePaperSupervisorConfig(BaseModel):
     export_txt: bool = False
     reports_dir: Path = DEFAULT_REALTIME_REPORTS_DIR
     max_consecutive_provider_failures: int = Field(default=2, ge=1, le=20)
+    max_data_age_seconds: float | None = Field(default=None, gt=0.0)
+    min_data_quality_score: float = Field(default=75.0, ge=0.0, le=100.0)
+    warn_data_quality_score: float = Field(default=90.0, ge=0.0, le=100.0)
+    max_spread_atr_ratio: float = Field(default=0.25, gt=0.0, le=10.0)
 
     @field_validator("symbols")
     @classmethod
@@ -194,6 +198,10 @@ class RealtimePaperSupervisorService:
                 reports_dir=config.reports_dir,
                 export_json=config.export_json,
                 export_txt=config.export_txt,
+                max_age_seconds=config.max_data_age_seconds,
+                min_quality_score=config.min_data_quality_score,
+                warn_quality_score=config.warn_data_quality_score,
+                max_spread_atr_ratio=config.max_spread_atr_ratio,
             ))
             if data_report.status == RealtimeDataHealthStatus.BLOCKED_PROVIDER_FAILURE:
                 provider_failures += 1
