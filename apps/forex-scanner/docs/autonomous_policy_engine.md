@@ -227,3 +227,14 @@ The policy engine is intentionally permission-only:
 ## Why this still does not authorize live trading
 
 The policy engine is a paper/demo-only permission layer. Every decision includes safety flags proving that `live_trading_enabled`, `live_execution_allowed`, `broker_live_execution_allowed`, `broker_order_submission_allowed`, and `mt5_order_execution_allowed` are all `false`. The first four safety invariants unconditionally deny live trading, broker-live execution, MT5 order execution, and `order_send`. No policy mode, configuration, or action can override these invariants. The policy engine authorizes paper/demo diagnostic actions only and must not be used as evidence that live trading is approved.
+
+## Scenario-based validation
+
+Use the Autonomous Scenario Runner to validate how this component behaves as part of the wider autonomous stack. The runner creates synthetic local reports, evaluates policy decisions, simulates supervisor outcomes, and can recommend recovery plans without MT5, network access, `.env` mutation, daemon creation, live trading, broker-live execution, or order submission.
+
+```bash
+python scripts/autonomous_scenario_runner.py --list
+python scripts/autonomous_scenario_runner.py --all --export-json --export-txt --strict
+```
+
+See [Autonomous Scenario Runner](autonomous_scenario_runner.md) for scenario definitions, report schema, and interpretation guidance. Passing scenarios are audit evidence only; they do not authorize live trading.

@@ -140,3 +140,14 @@ Evidence Builder -> Readiness Gate -> Recovery Planner -> [Policy Engine] -> Aut
 ```
 
 The policy engine does not change readiness evaluation behavior. It provides an auditable permission check before the gate runs. This remains paper/demo-only and does not authorize live trading. See [`autonomous_policy_engine.md`](autonomous_policy_engine.md).
+
+## Scenario-based validation
+
+Use the Autonomous Scenario Runner to validate how this component behaves as part of the wider autonomous stack. The runner creates synthetic local reports, evaluates policy decisions, simulates supervisor outcomes, and can recommend recovery plans without MT5, network access, `.env` mutation, daemon creation, live trading, broker-live execution, or order submission.
+
+```bash
+python scripts/autonomous_scenario_runner.py --list
+python scripts/autonomous_scenario_runner.py --all --export-json --export-txt --strict
+```
+
+See [Autonomous Scenario Runner](autonomous_scenario_runner.md) for scenario definitions, report schema, and interpretation guidance. Passing scenarios are audit evidence only; they do not authorize live trading.

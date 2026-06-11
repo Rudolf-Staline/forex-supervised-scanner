@@ -170,3 +170,14 @@ python scripts/autonomous_policy_report.py --action run_supervisor --mode dry_ru
 ```
 
 The policy engine enforces 11 safety invariants on every check. It does not enable live trading, does not call MT5, and does not submit orders. See [`docs/autonomous_policy_engine.md`](docs/autonomous_policy_engine.md).
+
+### Autonomous Scenario Runner
+
+The forex scanner includes an Autonomous Scenario Runner for cloud-safe end-to-end policy/readiness simulations. It uses synthetic local reports to validate how the Evidence Builder posture, Readiness Gate state, Recovery Planner, Policy Engine, and Autonomous Supervisor simulation behave together.
+
+```bash
+python scripts/autonomous_scenario_runner.py --list
+python scripts/autonomous_scenario_runner.py --all --export-json --export-txt --strict
+```
+
+Exports are written to `reports/autonomous_scenario_suite.json` and `reports/autonomous_scenario_suite.txt` by default, or to a test/temp path with `--reports-dir`. The runner is paper/demo/read-only and does not require MT5, network access, broker credentials, `.env` mutation, daemon creation, live trading, broker-live execution, or order submission. See `docs/autonomous_scenario_runner.md` for details.
