@@ -24,7 +24,7 @@ The realtime paper readiness layer is a bounded, foreground-only safety wrapper 
 python scripts/realtime_data_check.py --provider mt5 --symbols EUR/USD GBP/USD --timeframe M1 --export-json --export-txt
 ```
 
-For CI or offline validation, use synthetic data. Synthetic data is useful for checking the CLI and report path, but it is blocking for realtime paper mode by design:
+For CI or offline validation, use synthetic data. Synthetic data is useful for checking the CLI and report path, but it is blocking for realtime paper mode by design. Reports distinguish an explicitly requested synthetic provider from an automatic synthetic fallback, and both remain unsafe for realtime paper operation:
 
 ```bash
 python scripts/realtime_data_check.py --provider synthetic --symbols EUR/USD --timeframe M1 --export-json --export-txt

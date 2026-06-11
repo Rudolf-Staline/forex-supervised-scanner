@@ -14,13 +14,12 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field, field_validator
 
 from app.config.settings import PROJECT_ROOT
 from app.core.types import TIMEFRAME_MINUTES, Timeframe
-from app.data.providers import DataProviderError, MarketDataProvider
+from app.data.providers import MarketDataProvider
 from app.data.validation import assess_data_quality
 
 DEFAULT_REALTIME_DATA_HEALTH_JSON = "realtime_data_health.json"
@@ -279,10 +278,10 @@ def _average_true_range(df: pd.DataFrame, period: int = 14) -> float | None:
 
 
 def _fallback_status(requested: str, actual: str, warning: object) -> str:
+    if actual.lower() == "synthetic":
+        return "synthetic_provider_used" if requested.lower() == "synthetic" and not warning else "synthetic_fallback_used"
     if requested.lower() == actual.lower() and not warning:
         return "not_used"
-    if actual.lower() == "synthetic":
-        return "synthetic_fallback_used"
     return f"fallback_to_{actual}"
 
 
