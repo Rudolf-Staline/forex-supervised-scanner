@@ -7,7 +7,7 @@ The realtime paper readiness layer is a bounded, foreground-only safety wrapper 
 - Checks market data freshness, spread availability, spread/ATR, missing bars, duplicate bars, provider fallback, synthetic fallback, MT5 usage, and an overall data quality score.
 - Runs realtime data health first, then autonomous evidence, readiness, and policy before any paper supervisor cycle is allowed.
 - Writes a heartbeat record for every cycle, including data health, evidence, readiness, policy, operator controls, and safety flags.
-- Stops on stale data, synthetic fallback, provider failures, operator maintenance/degraded mode, evidence failure, readiness denial, policy denial, or safety environment drift.
+- Stops on stale data, synthetic fallback (`BLOCKED_SYNTHETIC_FALLBACK`), provider failures, operator maintenance/degraded mode, evidence failure, readiness denial, policy denial, or safety environment drift.
 - Stops at `--max-cycles` or `--max-runtime-minutes`; it is not a daemon.
 
 ## What it never does
@@ -62,7 +62,7 @@ Any drift stops the run with `BLOCKED_BY_SAFETY_DRIFT`.
 
 ## Local MT5 warning
 
-`--provider mt5` requires a local MT5 terminal and Python package configured on the operator workstation. Cloud tests do not require MT5 and should rely on mocks or synthetic CLI smoke checks. If MT5 fails and the provider path falls back to synthetic data, realtime paper mode blocks instead of silently accepting the synthetic fallback.
+`--provider mt5` requires a local MT5 terminal and Python package configured on the operator workstation. Cloud tests do not require MT5 and should rely on mocks or synthetic CLI smoke checks. If MT5 fails and the provider path falls back to synthetic data, realtime paper mode stops explicitly with `BLOCKED_SYNTHETIC_FALLBACK` instead of silently accepting the synthetic fallback.
 
 ## Realtime paper vs live trading
 
