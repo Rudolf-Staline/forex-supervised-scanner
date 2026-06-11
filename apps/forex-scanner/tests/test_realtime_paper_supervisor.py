@@ -110,6 +110,15 @@ def test_safety_env_drift_blocks(settings, tmp_path: Path, monkeypatch):
     assert report.cycles_attempted == 1
 
 
+def test_live_confirmation_env_drift_blocks(settings, tmp_path: Path, monkeypatch):
+    monkeypatch.setenv(settings.broker.live_confirmation_env, settings.broker.live_confirmation_value)
+    service = RealtimePaperSupervisorService(settings, DummyProvider(), DummyDB(), data_health_service=FakeDataHealth([RealtimeDataHealthStatus.REALTIME_DATA_READY]))
+    report = service.run(config(tmp_path))
+    assert report.stop_reason == RealtimePaperStopReason.BLOCKED_BY_SAFETY_DRIFT.value
+    assert any(settings.broker.live_confirmation_env in reason for reason in report.blocking_reasons)
+    assert report.paper_orders_created == 0
+
+
 def test_maintenance_degraded_mode_blocks(settings, tmp_path: Path):
     service = RealtimePaperSupervisorService(settings, DummyProvider(), DummyDB(maintenance=True), data_health_service=FakeDataHealth([RealtimeDataHealthStatus.REALTIME_DATA_READY]))
     report = service.run(config(tmp_path))
