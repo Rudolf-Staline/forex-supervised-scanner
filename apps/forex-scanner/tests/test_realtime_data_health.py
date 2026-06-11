@@ -76,6 +76,17 @@ def test_synthetic_fallback_blocks_realtime_paper_mode(tmp_path: Path):
     report = check(FrameProvider(df, provider_name="synthetic"), tmp_path)
     assert report.status == RealtimeDataHealthStatus.BLOCKED_SYNTHETIC_FALLBACK
     assert report.synthetic_fallback_used is True
+    assert report.provider_fallback_status == "synthetic_fallback_used"
+
+
+def test_requested_synthetic_provider_is_explicitly_reported_and_blocked(tmp_path: Path):
+    report = RealtimeDataHealthService(FrameProvider(candles(), provider_name="synthetic"), now_fn=lambda: NOW).check(
+        RealtimeDataHealthConfig(provider="synthetic", symbols=["EUR/USD"], timeframe=Timeframe.M1, reports_dir=tmp_path)
+    )
+    assert report.status == RealtimeDataHealthStatus.BLOCKED_SYNTHETIC_FALLBACK
+    assert report.provider_fallback_status == "synthetic_provider_used"
+    assert report.synthetic_fallback_used is True
+    assert report.safe_for_realtime_paper is False
 
 
 def test_poor_data_quality_blocks(tmp_path: Path):
