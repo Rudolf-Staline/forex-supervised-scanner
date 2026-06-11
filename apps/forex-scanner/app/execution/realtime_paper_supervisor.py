@@ -279,6 +279,25 @@ class RealtimePaperSupervisorService:
 
             cycle_orders = self._run_autonomous_if_allowed(config)
             orders_created += cycle_orders
+            post_cycle_drift_reasons = realtime_safety_drift_reasons(self.settings)
+            if post_cycle_drift_reasons:
+                stop_reason = RealtimePaperStopReason.BLOCKED_BY_SAFETY_DRIFT.value
+                blocking_reasons.extend(post_cycle_drift_reasons)
+                record = self._record(
+                    cycle_number,
+                    cycle_started,
+                    data_report.status.value,
+                    readiness_status,
+                    policy_label,
+                    stop_reason,
+                    post_cycle_drift_reasons,
+                    controls,
+                    cycle_orders,
+                    evidence_status=evidence_status,
+                )
+                self._write_heartbeat(heartbeat_path, run_id, record)
+                cycles.append(record)
+                break
             record = self._record(cycle_number, cycle_started, data_report.status.value, readiness_status, policy_label, None, [], controls, cycle_orders, evidence_status=evidence_status)
             self._write_heartbeat(heartbeat_path, run_id, record)
             cycles.append(record)
