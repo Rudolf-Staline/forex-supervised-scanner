@@ -23,7 +23,7 @@ from app.config.settings import AppSettings, PROJECT_ROOT
 from app.config.watchlists import get_watchlist
 from app.core.types import Timeframe, TradingStyle
 from app.data.providers import MarketDataProvider
-from app.execution.autonomous_evidence import AutonomousEvidenceConfig, AutonomousEvidenceMode, build_evidence
+from app.execution.autonomous_evidence import AutonomousEvidenceConfig, AutonomousEvidenceFinalStatus, AutonomousEvidenceMode, build_evidence
 from app.execution.autonomous_policy import AutonomousPolicyContext, AutonomousPolicyEngine, AutonomousPolicyMode
 from app.execution.autonomous_readiness import AutonomousReadinessConfig, AutonomousReadinessFinalStatus, build_readiness_report
 from app.execution.autonomous_recovery import AutonomousRecoveryConfig, build_recovery_plan
@@ -51,6 +51,7 @@ class RealtimePaperStopReason(StrEnum):
     BLOCKED_BY_OPERATOR_CONTROL = "BLOCKED_BY_OPERATOR_CONTROL"
     BLOCKED_BY_POLICY = "BLOCKED_BY_POLICY"
     BLOCKED_BY_READINESS = "BLOCKED_BY_READINESS"
+    BLOCKED_BY_EVIDENCE = "BLOCKED_BY_EVIDENCE"
     BLOCKED_BY_PROVIDER_FAILURES = "BLOCKED_BY_PROVIDER_FAILURES"
 
 
@@ -91,6 +92,7 @@ class RealtimeCycleRecord(BaseModel):
     data_health_status: str
     readiness_status: str
     policy_decision: str
+    evidence_status: str = "UNKNOWN"
     paper_orders_created: int = 0
     stop_reason: str | None = None
     safety_flags: dict[str, object] = Field(default_factory=dict)
@@ -109,6 +111,7 @@ class RealtimePaperSupervisorReport(BaseModel):
     data_health_status: str
     readiness_status: str
     policy_decision: str
+    evidence_status: str = "UNKNOWN"
     recovery_plan_summary: str | None = None
     cycles_attempted: int
     cycles_completed: int
@@ -120,6 +123,7 @@ class RealtimePaperSupervisorReport(BaseModel):
     cycles: list[RealtimeCycleRecord] = Field(default_factory=list)
     data_health_report: dict[str, object] | None = None
     readiness_report: dict[str, object] | None = None
+    evidence_report: dict[str, object] | None = None
     blocking_reasons: list[str] = Field(default_factory=list)
 
 
@@ -155,12 +159,11 @@ class RealtimePaperSupervisorService:
         policy_label = "UNKNOWN"
         data_report: RealtimeDataHealthReport | None = None
         readiness_payload: dict[str, object] | None = None
+        evidence_status = "UNKNOWN"
+        evidence_payload: dict[str, object] | None = None
         provider_failures = 0
         orders_created = 0
         blocking_reasons: list[str] = []
-
-        if config.build_evidence_first:
-            build_evidence(AutonomousEvidenceConfig(mode=AutonomousEvidenceMode.READ_ONLY, reports_dir=config.reports_dir))
 
         deadline_seconds = config.max_runtime_minutes * 60.0 if config.max_runtime_minutes is not None else None
         for cycle_number in range(1, config.max_cycles + 1):
@@ -170,7 +173,7 @@ class RealtimePaperSupervisorService:
             if drift_reasons:
                 stop_reason = RealtimePaperStopReason.BLOCKED_BY_SAFETY_DRIFT.value
                 blocking_reasons.extend(drift_reasons)
-                record = self._record(cycle_number, cycle_started, "UNKNOWN", readiness_status, policy_label, stop_reason, drift_reasons, controls, 0)
+                record = self._record(cycle_number, cycle_started, "UNKNOWN", readiness_status, policy_label, stop_reason, drift_reasons, controls, 0, evidence_status=evidence_status)
                 self._write_heartbeat(heartbeat_path, run_id, record)
                 cycles.append(record)
                 break
@@ -178,7 +181,7 @@ class RealtimePaperSupervisorService:
             if op_reasons:
                 stop_reason = RealtimePaperStopReason.BLOCKED_BY_OPERATOR_CONTROL.value
                 blocking_reasons.extend(op_reasons)
-                record = self._record(cycle_number, cycle_started, "UNKNOWN", readiness_status, policy_label, stop_reason, op_reasons, controls, 0)
+                record = self._record(cycle_number, cycle_started, "UNKNOWN", readiness_status, policy_label, stop_reason, op_reasons, controls, 0, evidence_status=evidence_status)
                 self._write_heartbeat(heartbeat_path, run_id, record)
                 cycles.append(record)
                 break
@@ -205,7 +208,31 @@ class RealtimePaperSupervisorService:
                 blocking_reasons.extend(data_report.blocking_reasons)
                 if config.plan_recovery_on_block:
                     recovery_summary = _recovery_summary(build_recovery_plan(AutonomousRecoveryConfig(reports_dir=config.reports_dir)))
-                record = self._record(cycle_number, cycle_started, data_report.status.value, readiness_status, policy_label, stop_reason, data_report.blocking_reasons, controls, 0)
+                record = self._record(cycle_number, cycle_started, data_report.status.value, readiness_status, policy_label, stop_reason, data_report.blocking_reasons, controls, 0, evidence_status=evidence_status)
+                self._write_heartbeat(heartbeat_path, run_id, record)
+                cycles.append(record)
+                break
+
+            evidence = build_evidence(
+                self.settings,
+                self.database,
+                AutonomousEvidenceConfig(
+                    mode=AutonomousEvidenceMode.READ_ONLY,
+                    reports_dir=config.reports_dir,
+                    symbols=config.symbols,
+                    export_json=config.export_json,
+                    export_txt=config.export_txt,
+                    fail_fast=True,
+                ),
+            )
+            evidence_status = evidence.final_status.value
+            evidence_payload = evidence.model_dump(mode="json")
+            if evidence.final_status == AutonomousEvidenceFinalStatus.BLOCKED_EVIDENCE:
+                stop_reason = RealtimePaperStopReason.BLOCKED_BY_EVIDENCE.value
+                blocking_reasons.extend(evidence.blocking_failures)
+                if config.plan_recovery_on_block:
+                    recovery_summary = _recovery_summary(build_recovery_plan(AutonomousRecoveryConfig(reports_dir=config.reports_dir)))
+                record = self._record(cycle_number, cycle_started, data_report.status.value, readiness_status, policy_label, stop_reason, evidence.blocking_failures, controls, 0, evidence_status=evidence_status)
                 self._write_heartbeat(heartbeat_path, run_id, record)
                 cycles.append(record)
                 break
@@ -218,7 +245,7 @@ class RealtimePaperSupervisorService:
                 blocking_reasons.extend(readiness.blocking_reasons)
                 if config.plan_recovery_on_block:
                     recovery_summary = _recovery_summary(build_recovery_plan(AutonomousRecoveryConfig(reports_dir=config.reports_dir)))
-                record = self._record(cycle_number, cycle_started, data_report.status.value, readiness_status, policy_label, stop_reason, readiness.blocking_reasons, controls, 0)
+                record = self._record(cycle_number, cycle_started, data_report.status.value, readiness_status, policy_label, stop_reason, readiness.blocking_reasons, controls, 0, evidence_status=evidence_status)
                 self._write_heartbeat(heartbeat_path, run_id, record)
                 cycles.append(record)
                 break
@@ -227,21 +254,21 @@ class RealtimePaperSupervisorService:
                 mode=AutonomousPolicyMode.DRY_RUN if config.dry_run else AutonomousPolicyMode.PAPER,
                 dry_run=config.dry_run,
                 readiness_status=readiness_status,
-                evidence_status="READY",
+                evidence_status=evidence_status,
                 operator_mode="normal",
             ))
             policy_label = policy.decision.value
             if not policy.allowed:
                 stop_reason = RealtimePaperStopReason.BLOCKED_BY_POLICY.value
                 blocking_reasons.extend(policy.blocking_reasons)
-                record = self._record(cycle_number, cycle_started, data_report.status.value, readiness_status, policy_label, stop_reason, policy.blocking_reasons, controls, 0)
+                record = self._record(cycle_number, cycle_started, data_report.status.value, readiness_status, policy_label, stop_reason, policy.blocking_reasons, controls, 0, evidence_status=evidence_status)
                 self._write_heartbeat(heartbeat_path, run_id, record)
                 cycles.append(record)
                 break
 
             cycle_orders = self._run_autonomous_if_allowed(config)
             orders_created += cycle_orders
-            record = self._record(cycle_number, cycle_started, data_report.status.value, readiness_status, policy_label, None, [], controls, cycle_orders)
+            record = self._record(cycle_number, cycle_started, data_report.status.value, readiness_status, policy_label, None, [], controls, cycle_orders, evidence_status=evidence_status)
             self._write_heartbeat(heartbeat_path, run_id, record)
             cycles.append(record)
             if deadline_seconds is not None and (self.now_fn() - started_at).total_seconds() >= deadline_seconds:
@@ -269,6 +296,7 @@ class RealtimePaperSupervisorService:
             data_health_status=data_report.status.value if data_report else "UNKNOWN",
             readiness_status=readiness_status,
             policy_decision=policy_label,
+            evidence_status=evidence_status,
             recovery_plan_summary=recovery_summary,
             cycles_attempted=len(cycles),
             cycles_completed=sum(1 for cycle in cycles if cycle.stop_reason is None),
@@ -280,6 +308,7 @@ class RealtimePaperSupervisorService:
             cycles=cycles,
             data_health_report=data_report.model_dump(mode="json") if data_report else None,
             readiness_report=readiness_payload,
+            evidence_report=evidence_payload,
             blocking_reasons=blocking_reasons,
         )
         if config.export_json:
@@ -315,7 +344,7 @@ class RealtimePaperSupervisorService:
                 "degraded_mode": _env_bool("OPERATOR_DEGRADED_MODE"),
             }
 
-    def _record(self, cycle: int, started_at: datetime, data_status: str, readiness: str, policy: str, stop: str | None, reasons: list[str], controls: dict[str, object], orders: int) -> RealtimeCycleRecord:
+    def _record(self, cycle: int, started_at: datetime, data_status: str, readiness: str, policy: str, stop: str | None, reasons: list[str], controls: dict[str, object], orders: int, *, evidence_status: str = "UNKNOWN") -> RealtimeCycleRecord:
         return RealtimeCycleRecord(
             cycle=cycle,
             started_at=started_at,
@@ -323,6 +352,7 @@ class RealtimePaperSupervisorService:
             data_health_status=data_status,
             readiness_status=readiness,
             policy_decision=policy,
+            evidence_status=evidence_status,
             paper_orders_created=orders,
             stop_reason=stop,
             safety_flags=realtime_safety_flags(self.settings),
@@ -401,6 +431,7 @@ def export_realtime_paper_supervisor_txt(report: RealtimePaperSupervisorReport, 
         f"data_health_status={report.data_health_status}",
         f"readiness_status={report.readiness_status}",
         f"policy_decision={report.policy_decision}",
+        f"evidence_status={report.evidence_status}",
         f"cycles_attempted={report.cycles_attempted}",
         f"cycles_completed={report.cycles_completed}",
         f"paper_orders_created={report.paper_orders_created}",

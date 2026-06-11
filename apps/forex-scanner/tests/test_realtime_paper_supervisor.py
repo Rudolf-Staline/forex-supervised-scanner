@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.config.settings import load_settings
 from app.core.types import Timeframe
+from app.execution.autonomous_evidence import AutonomousEvidenceFinalStatus
 from app.execution.autonomous_readiness import AutonomousReadinessFinalStatus
 from app.execution.realtime_data_health import RealtimeDataHealthReport, RealtimeDataHealthStatus
 from app.execution.realtime_paper_supervisor import (
@@ -37,6 +38,11 @@ class DummyDB:
 class DummyReadiness(BaseModel):
     final_status: AutonomousReadinessFinalStatus
     blocking_reasons: list[str] = []
+
+
+class DummyEvidence(BaseModel):
+    final_status: AutonomousEvidenceFinalStatus
+    blocking_failures: list[str] = []
 
 
 class FakeDataHealth:
@@ -123,6 +129,46 @@ def test_maintenance_degraded_mode_blocks(settings, tmp_path: Path):
     service = RealtimePaperSupervisorService(settings, DummyProvider(), DummyDB(maintenance=True), data_health_service=FakeDataHealth([RealtimeDataHealthStatus.REALTIME_DATA_READY]))
     report = service.run(config(tmp_path))
     assert report.stop_reason == RealtimePaperStopReason.BLOCKED_BY_OPERATOR_CONTROL.value
+
+
+def test_evidence_runs_before_readiness_and_policy(settings, tmp_path: Path, monkeypatch):
+    calls: list[str] = []
+
+    def evidence(*args, **kwargs):
+        calls.append("evidence")
+        return DummyEvidence(final_status=AutonomousEvidenceFinalStatus.READY_EVIDENCE)
+
+    def readiness(*args, **kwargs):
+        calls.append("readiness")
+        return DummyReadiness(final_status=AutonomousReadinessFinalStatus.READY)
+
+    monkeypatch.setattr("app.execution.realtime_paper_supervisor.build_evidence", evidence)
+    monkeypatch.setattr("app.execution.realtime_paper_supervisor.build_readiness_report", readiness)
+    service = RealtimePaperSupervisorService(settings, DummyProvider(), DummyDB(), data_health_service=FakeDataHealth([RealtimeDataHealthStatus.REALTIME_DATA_READY]))
+    report = service.run(config(tmp_path, max_cycles=1))
+    assert calls == ["evidence", "readiness"]
+    assert report.evidence_status == AutonomousEvidenceFinalStatus.READY_EVIDENCE.value
+    assert report.cycles[0].evidence_status == AutonomousEvidenceFinalStatus.READY_EVIDENCE.value
+
+
+def test_blocked_evidence_stops_before_readiness(settings, tmp_path: Path, monkeypatch):
+    readiness_called = False
+
+    def blocked_evidence(*args, **kwargs):
+        return DummyEvidence(final_status=AutonomousEvidenceFinalStatus.BLOCKED_EVIDENCE, blocking_failures=["evidence blocked"])
+
+    def readiness(*args, **kwargs):
+        nonlocal readiness_called
+        readiness_called = True
+        return DummyReadiness(final_status=AutonomousReadinessFinalStatus.READY)
+
+    monkeypatch.setattr("app.execution.realtime_paper_supervisor.build_evidence", blocked_evidence)
+    monkeypatch.setattr("app.execution.realtime_paper_supervisor.build_readiness_report", readiness)
+    service = RealtimePaperSupervisorService(settings, DummyProvider(), DummyDB(), data_health_service=FakeDataHealth([RealtimeDataHealthStatus.REALTIME_DATA_READY]))
+    report = service.run(config(tmp_path, max_cycles=1))
+    assert report.stop_reason == RealtimePaperStopReason.BLOCKED_BY_EVIDENCE.value
+    assert report.blocking_reasons == ["evidence blocked"]
+    assert readiness_called is False
 
 
 def test_policy_denial_blocks(settings, tmp_path: Path, monkeypatch):

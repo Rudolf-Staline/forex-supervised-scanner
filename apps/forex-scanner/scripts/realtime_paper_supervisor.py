@@ -78,7 +78,8 @@ def main() -> int:
     print(
         "realtime_paper_supervisor="
         f"{report.stop_reason} cycles={report.cycles_attempted}/{config.max_cycles} "
-        f"orders={report.paper_orders_created} data_health={report.data_health_status} readiness={report.readiness_status}"
+        f"orders={report.paper_orders_created} data_health={report.data_health_status} "
+        f"evidence={report.evidence_status} readiness={report.readiness_status}"
     )
     print("safety=paper_demo_only live_execution_allowed=false broker_order_submission_allowed=false order_send_called=false")
     for reason in report.blocking_reasons:

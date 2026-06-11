@@ -5,9 +5,9 @@ The realtime paper readiness layer is a bounded, foreground-only safety wrapper 
 ## What it does
 
 - Checks market data freshness, spread availability, spread/ATR, missing bars, duplicate bars, provider fallback, synthetic fallback, MT5 usage, and an overall data quality score.
-- Runs the autonomous evidence/readiness/policy sequence before any paper supervisor cycle is allowed.
-- Writes a heartbeat record for every cycle.
-- Stops on stale data, synthetic fallback, provider failures, operator maintenance/degraded mode, policy denial, readiness denial, or safety environment drift.
+- Runs realtime data health first, then autonomous evidence, readiness, and policy before any paper supervisor cycle is allowed.
+- Writes a heartbeat record for every cycle, including data health, evidence, readiness, policy, operator controls, and safety flags.
+- Stops on stale data, synthetic fallback, provider failures, operator maintenance/degraded mode, evidence failure, readiness denial, policy denial, or safety environment drift.
 - Stops at `--max-cycles` or `--max-runtime-minutes`; it is not a daemon.
 
 ## What it never does
@@ -43,6 +43,8 @@ The supervisor writes:
 - `reports/realtime_paper_supervisor_summary.json`
 - `reports/realtime_paper_supervisor_report.txt`
 - `reports/realtime_heartbeat.jsonl`
+
+The supervisor JSON/TXT summary includes `evidence_status`; heartbeat entries include per-cycle `evidence_status` so operators can prove evidence ran before readiness and policy allowed paper-only supervision.
 
 ## Safety environment
 
