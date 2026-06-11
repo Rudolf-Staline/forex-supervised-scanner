@@ -47,6 +47,7 @@ class RealtimePaperStopReason(StrEnum):
     COMPLETED_MAX_RUNTIME = "COMPLETED_MAX_RUNTIME"
     BLOCKED_BY_SAFETY_DRIFT = "BLOCKED_BY_SAFETY_DRIFT"
     BLOCKED_STALE_DATA = "BLOCKED_STALE_DATA"
+    BLOCKED_SYNTHETIC_FALLBACK = "BLOCKED_SYNTHETIC_FALLBACK"
     BLOCKED_DATA_HEALTH = "BLOCKED_DATA_HEALTH"
     BLOCKED_BY_OPERATOR_CONTROL = "BLOCKED_BY_OPERATOR_CONTROL"
     BLOCKED_BY_POLICY = "BLOCKED_BY_POLICY"
@@ -200,6 +201,8 @@ class RealtimePaperSupervisorService:
                 provider_failures = 0
             if provider_failures >= config.max_consecutive_provider_failures:
                 stop_reason = RealtimePaperStopReason.BLOCKED_BY_PROVIDER_FAILURES.value
+            elif data_report.status == RealtimeDataHealthStatus.BLOCKED_SYNTHETIC_FALLBACK:
+                stop_reason = RealtimePaperStopReason.BLOCKED_SYNTHETIC_FALLBACK.value
             elif data_report.status == RealtimeDataHealthStatus.BLOCKED_STALE_DATA:
                 stop_reason = RealtimePaperStopReason.BLOCKED_STALE_DATA.value
             elif not data_report.safe_for_realtime_paper:

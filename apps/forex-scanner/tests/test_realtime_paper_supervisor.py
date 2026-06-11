@@ -202,6 +202,19 @@ def test_stale_data_stops(settings, tmp_path: Path, monkeypatch):
     assert report.stop_reason == RealtimePaperStopReason.BLOCKED_STALE_DATA.value
 
 
+def test_synthetic_fallback_has_explicit_stop_reason(settings, tmp_path: Path, monkeypatch):
+    patch_ready(monkeypatch)
+    service = RealtimePaperSupervisorService(
+        settings,
+        DummyProvider(),
+        DummyDB(),
+        data_health_service=FakeDataHealth([RealtimeDataHealthStatus.BLOCKED_SYNTHETIC_FALLBACK]),
+    )
+    report = service.run(config(tmp_path))
+    assert report.stop_reason == RealtimePaperStopReason.BLOCKED_SYNTHETIC_FALLBACK.value
+    assert report.paper_orders_created == 0
+
+
 def test_provider_failures_stop_after_repeated_failures(settings, tmp_path: Path, monkeypatch):
     patch_ready(monkeypatch)
     cfg = config(tmp_path, max_cycles=3).model_copy(update={"max_consecutive_provider_failures": 1})
