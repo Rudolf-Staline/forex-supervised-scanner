@@ -46,6 +46,17 @@ The supervisor writes:
 
 The supervisor JSON/TXT summary includes `evidence_status`; heartbeat entries include per-cycle `evidence_status`, `heartbeat_sequence`, `runtime_safety_heartbeat`, `paper_demo_only`, and `live_execution_allowed=false` so operators can prove evidence ran before readiness and policy allowed paper-only supervision without live execution.
 
+## Realtime data thresholds
+
+Both CLI entry points expose the same data-quality controls so operators can tighten local readiness checks without editing code or `.env`:
+
+- `--max-data-age-seconds` overrides the default stale-candle cutoff.
+- `--min-data-quality-score` blocks symbols below the minimum quality score.
+- `--warn-data-quality-score` emits a warning below the warning threshold when the symbol is otherwise safe.
+- `--max-spread-atr-ratio` blocks candles whose latest spread is too large relative to ATR.
+
+The supervisor forwards those values into the realtime data-health check on every bounded foreground cycle, before evidence, readiness, policy, or paper-only autonomous supervision can run.
+
 ## Safety environment
 
 Every cycle verifies:

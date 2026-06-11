@@ -46,6 +46,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--export-json", action="store_true")
     parser.add_argument("--export-txt", action="store_true")
     parser.add_argument("--reports-dir", default="reports")
+    parser.add_argument("--max-data-age-seconds", type=float, default=None, help="Override the stale-candle cutoff for realtime data.")
+    parser.add_argument("--min-data-quality-score", type=float, default=75.0, help="Block below this data quality score.")
+    parser.add_argument("--warn-data-quality-score", type=float, default=90.0, help="Warn below this data quality score when not blocked.")
+    parser.add_argument("--max-spread-atr-ratio", type=float, default=0.25, help="Block when latest spread divided by ATR exceeds this ratio.")
     return parser.parse_args()
 
 
@@ -66,6 +70,10 @@ def main() -> int:
         reports_dir=Path(args.reports_dir),
         export_json=args.export_json,
         export_txt=args.export_txt,
+        max_age_seconds=args.max_data_age_seconds,
+        min_quality_score=args.min_data_quality_score,
+        warn_quality_score=args.warn_data_quality_score,
+        max_spread_atr_ratio=args.max_spread_atr_ratio,
     )
     report = RealtimeDataHealthService(provider).check(config)
     print(f"realtime_data_health={report.status.value} safe_for_realtime_paper={str(report.safe_for_realtime_paper).lower()}")

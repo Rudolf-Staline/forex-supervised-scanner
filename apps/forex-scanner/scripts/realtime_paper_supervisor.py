@@ -46,6 +46,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--export-json", action="store_true")
     parser.add_argument("--export-txt", action="store_true")
     parser.add_argument("--reports-dir", default="reports")
+    parser.add_argument("--max-data-age-seconds", type=float, default=None, help="Override the stale-candle cutoff for realtime data.")
+    parser.add_argument("--min-data-quality-score", type=float, default=75.0, help="Block below this data quality score.")
+    parser.add_argument("--warn-data-quality-score", type=float, default=90.0, help="Warn below this data quality score when not blocked.")
+    parser.add_argument("--max-spread-atr-ratio", type=float, default=0.25, help="Block when latest spread divided by ATR exceeds this ratio.")
     return parser.parse_args()
 
 
@@ -73,6 +77,10 @@ def main() -> int:
         export_json=args.export_json,
         export_txt=args.export_txt,
         reports_dir=Path(args.reports_dir),
+        max_data_age_seconds=args.max_data_age_seconds,
+        min_data_quality_score=args.min_data_quality_score,
+        warn_data_quality_score=args.warn_data_quality_score,
+        max_spread_atr_ratio=args.max_spread_atr_ratio,
     )
     report = RealtimePaperSupervisorService(settings, provider, database).run(config)
     print(
