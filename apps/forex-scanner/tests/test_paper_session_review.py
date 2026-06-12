@@ -51,7 +51,7 @@ def write_minimal_ready_reports(reports_dir: Path) -> None:
     write_json(reports_dir / "realtime_command_center_summary.json", {"generated_at": timestamp, "final_status": "COMPLETED"})
     write_json(
         reports_dir / "realtime_paper_supervisor_summary.json",
-        {"generated_at": timestamp, "final_status": "COMPLETED_MAX_CYCLES"},
+        {"generated_at": timestamp, "stop_reason": "COMPLETED_MAX_CYCLES"},
     )
     write_json(
         reports_dir / "realtime_paper_positions.json",
@@ -75,7 +75,6 @@ def write_minimal_ready_reports(reports_dir: Path) -> None:
     )
     (reports_dir / "realtime_heartbeat.jsonl").write_text(json.dumps({"heartbeat_at": timestamp, "status": "OK"}) + "\n", encoding="utf-8")
     write_json(reports_dir / "autonomous_scenario_suite.json", {"generated_at": timestamp, "final_status": "PASS"})
-
 
 
 def test_review_exports_summary_dashboard_and_performance(tmp_path: Path) -> None:
