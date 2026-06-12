@@ -260,3 +260,16 @@ For the complete, step-by-step local operator workflow — chaining read-only MT
 See [`docs/local_paper_operation_runbook.md`](docs/local_paper_operation_runbook.md).
 
 Use it when you want a single human-readable procedure for running the project locally in safe paper/demo mode and interpreting the resulting reports. It remains paper/demo only: it does not enable or authorize live trading, keeps MT5 validation read-only, and is not a go-live approval.
+
+## Operator Report Dashboard
+
+Summarize the current paper/demo system state from existing report artifacts with the read-only operator dashboard:
+
+```bash
+python scripts/operator_dashboard.py --reports-dir reports --export-json --export-txt
+python scripts/operator_dashboard.py --reports-dir reports --strict
+```
+
+It aggregates MT5 realtime validation, command center, realtime paper supervisor, position manager, runtime safety heartbeat, scenarios, and (when present) readiness/evidence/policy/recovery reports into one `final_operator_status`, with stale/missing report detection and recommended next actions. Exports go to `reports/operator_dashboard_summary.json` and `reports/operator_dashboard_report.txt`.
+
+The dashboard is strictly read-only and works offline: no trading logic, no MT5, no `order_send`, no broker orders, no `.env` mutation, no daemon, and no MT5 requirement in CI. See [`docs/operator_dashboard.md`](docs/operator_dashboard.md).
