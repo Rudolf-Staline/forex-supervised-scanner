@@ -302,3 +302,9 @@ python scripts/paper_performance_report.py --reports-dir reports --export-json -
 ```
 
 It reads local paper/demo reports and the existing local `paper_orders` store when present. It does not run strategies, does not call MT5, does not call `order_send`, does not submit broker orders, does not mutate `.env`, and does not authorize live trading. Outputs are diagnostic evidence only: `reports/paper_performance_summary.json` and `reports/paper_performance_report.txt`. See [`docs/paper_performance.md`](docs/paper_performance.md).
+
+## Stale Issue Resolution Plan
+
+Several older GitHub issues remain open even though their requested paper/demo features appear to have landed through later merged PRs. The stale issue resolution plan documents the implementation evidence and gives manual closure recommendations.
+
+See [`docs/stale_issue_resolution_plan.md`](docs/stale_issue_resolution_plan.md).
