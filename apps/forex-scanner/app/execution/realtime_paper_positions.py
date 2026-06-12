@@ -39,6 +39,13 @@ _TERMINAL_STATUSES = {
     OrderStatus.EXPIRED_TRADE,
     OrderStatus.REJECTED,
 }
+_METRIC_UPDATE_FIELDS = {
+    "bars_in_trade",
+    "time_in_trade_minutes",
+    "mae",
+    "mfe",
+    "current_stop_loss",
+}
 
 
 class RealtimePaperPositionState(StrEnum):
@@ -215,7 +222,7 @@ class RealtimePaperPositionManagerService:
                 updates.append(_blocked_update(after, reason, config.dry_run))
                 continue
             update = _build_update(before_order, after, config.dry_run)
-            if update.events_created or update.before_status != update.after_status:
+            if update.events_created or update.before_status != update.after_status or _metric_fields_changed(before_order, after):
                 updates.append(update)
                 changed_orders.append(after)
 
@@ -324,6 +331,11 @@ def realtime_position_safety_flags(settings: AppSettings) -> dict[str, object]:
         "order_send_called": False,
         "env_mutation_performed": False,
     }
+
+
+def _metric_fields_changed(before: ExecutionOrder, after: ExecutionOrder) -> bool:
+    return any(getattr(before, field) != getattr(after, field) for field in _METRIC_UPDATE_FIELDS)
+
 
 def _build_update(before: ExecutionOrder, after: ExecutionOrder, dry_run: bool) -> RealtimePaperPositionUpdate:
     new_events = after.events[len(before.events) :]

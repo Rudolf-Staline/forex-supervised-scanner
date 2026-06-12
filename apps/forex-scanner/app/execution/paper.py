@@ -380,9 +380,10 @@ def _process_open_order(
     settings: AppSettings,
 ) -> tuple[ExecutionOrder, bool]:
     updated = order
-    stop_hit = _stop_touched(updated.request, high, low)
+    effective_stop = _effective_stop_loss(updated)
+    stop_hit = _stop_touched(updated.request, high, low, stop_loss=effective_stop)
     if stop_hit:
-        return _fully_closed_order(updated, _adverse_exit_price(updated, updated.request.stop_loss, spread_adjustment), timestamp, CloseReason.STOP_LOSS, _bars_in_trade(updated, bar_offset)), True
+        return _fully_closed_order(updated, _adverse_exit_price(updated, effective_stop, spread_adjustment), timestamp, CloseReason.STOP_LOSS, _bars_in_trade(updated, bar_offset)), True
 
     target_plan = _target_plan(updated.request, settings)
     if not target_plan and _target_touched(updated.request.direction, updated.request.take_profit, high, low):
@@ -448,20 +449,15 @@ def _apply_partial_exit(
 
 
 def _move_stop_to_breakeven(order: ExecutionOrder, timestamp: datetime) -> ExecutionOrder:
-    old_stop = order.request.stop_loss
-    entry = order.request.entry_price
-    if order.request.direction == DirectionBias.LONG:
-        entry = min(entry, order.request.take_profit - 1e-9)
-    else:
-        entry = max(entry, order.request.take_profit + 1e-9)
-    request = order.request.model_copy(update={"stop_loss": entry})
+    old_stop = _effective_stop_loss(order)
+    breakeven_stop = order.request.entry_price
     movement = StopMovement(
         timestamp=timestamp,
         from_stop=old_stop,
-        to_stop=request.stop_loss,
+        to_stop=breakeven_stop,
         reason="move stop to breakeven after TP1",
     )
-    updated = order.model_copy(update={"request": request, "stop_movements": [*order.stop_movements, movement]})
+    updated = order.model_copy(update={"current_stop_loss": breakeven_stop, "stop_movements": [*order.stop_movements, movement]})
     return _append_event(
         updated,
         TradeEventType.STOP_MOVED,
@@ -535,10 +531,15 @@ def _invalidation_touched(request: OrderRequest, high: float, low: float) -> boo
     return _stop_touched(request, high, low)
 
 
-def _stop_touched(request: OrderRequest, high: float, low: float) -> bool:
+def _stop_touched(request: OrderRequest, high: float, low: float, *, stop_loss: float | None = None) -> bool:
+    stop = request.stop_loss if stop_loss is None else stop_loss
     if request.direction == DirectionBias.LONG:
-        return low <= request.stop_loss
-    return high >= request.stop_loss
+        return low <= stop
+    return high >= stop
+
+
+def _effective_stop_loss(order: ExecutionOrder) -> float:
+    return order.current_stop_loss or order.request.stop_loss
 
 
 def _target_touched(direction: DirectionBias, target: float, high: float, low: float) -> bool:

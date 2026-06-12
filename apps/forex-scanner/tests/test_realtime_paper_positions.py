@@ -157,6 +157,16 @@ def run_manager(tmp_path: Path, settings, frame: pd.DataFrame, orders: list[Exec
     return report, db
 
 
+def test_zero_risk_long_order_is_rejected():
+    with pytest.raises(ValueError, match="long order requires stop below entry"):
+        request(stop_loss=1.1000)
+
+
+def test_zero_risk_short_order_is_rejected():
+    with pytest.raises(ValueError, match="short order requires target below entry"):
+        request(direction=DirectionBias.SHORT, stop_loss=1.1000, take_profit=1.0850)
+
+
 def test_pending_order_activates_when_price_reaches_entry(settings, tmp_path):
     report, db = run_manager(tmp_path, settings, bars(high=1.1010, low=1.0990), [order()])
     updated = db.load_paper_orders()[0]
@@ -199,9 +209,25 @@ def test_stop_moves_to_breakeven_after_tp1_when_configured(settings, tmp_path):
     paper_order = order(OrderStatus.OPEN_TRADE, request_updates={"tp1": 1.1050})
     report, db = run_manager(tmp_path, settings, bars(high=1.1060, low=1.1000), [paper_order])
     updated = db.load_paper_orders()[0]
-    assert updated.request.stop_loss == updated.request.entry_price
+    assert updated.request.stop_loss < updated.request.entry_price
+    assert updated.current_stop_loss == updated.request.entry_price
     assert report.breakeven_moves == 1
     assert any(event.event_type == TradeEventType.STOP_MOVED for event in updated.events)
+
+
+
+def test_metric_only_open_position_updates_are_persisted_and_counted(settings, tmp_path):
+    paper_order = order(OrderStatus.OPEN_TRADE)
+    report, db = run_manager(tmp_path, settings, bars(high=1.1020, low=1.0960, close=1.1010), [paper_order])
+    updated = db.load_paper_orders()[0]
+    assert updated.status == OrderStatus.OPEN_TRADE
+    assert updated.bars_in_trade and updated.bars_in_trade > 0
+    assert updated.time_in_trade_minutes is not None
+    assert updated.mae > 0
+    assert updated.mfe > 0
+    assert report.positions_updated == 1
+    assert report.positions_closed == 0
+    assert not report.updates[0].events_created
 
 
 def test_invalidation_before_activation_blocks_or_cancels_paper_order(settings, tmp_path):
