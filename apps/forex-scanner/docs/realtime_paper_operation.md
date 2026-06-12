@@ -141,3 +141,7 @@ Expected command-center exports:
 - `reports/realtime_command_center_report.txt`
 
 The command center is still paper/demo only. Synthetic data remains diagnostic and blocks realtime paper operation with `BLOCKED_SYNTHETIC_FALLBACK`; MT5 is not required in CI; no live trading, broker-live execution, `.env` mutation, daemon, infinite loop, or broker order submission is added. See [`realtime_command_center.md`](realtime_command_center.md).
+
+## Local Paper Operation Runbook
+
+When you want the full end-to-end local operator workflow rather than a single component, follow the Local Paper Operation Runbook. It chains read-only MT5 realtime validation, the Realtime Paper Command Center (optionally with `--run-scenarios` and `--manage-positions`), the paper supervisor, the paper position manager, and the runtime safety heartbeat into one procedure, with a copy-paste pass/fail checklist and a report-interpretation guide for every artifact. It is paper/demo only, keeps MT5 validation read-only, and is explicitly not a go-live approval. See [`local_paper_operation_runbook.md`](local_paper_operation_runbook.md).
