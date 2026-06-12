@@ -81,8 +81,9 @@ The CLI performs only local market-data reads:
 12. Computes spread/ATR when possible.
 13. Detects missing bars.
 14. Detects duplicate bars.
-15. Measures provider latency in milliseconds and records it as both `latency_ms` and `provider_latency_ms` for report readability.
-16. Repeats polling for the bounded duration only.
+15. Measures MT5 request latency in `latency_ms`.
+16. Measures provider-data latency from the freshest tick/candle timestamp in `provider_latency_ms`.
+17. Repeats polling for the bounded duration only.
 
 ## Expected reports
 
@@ -105,6 +106,7 @@ Reports include:
 - `account_info_available`
 - `terminal_info_available`
 - `symbol_selected`
+- `resolved_symbols`
 - `latest_candle_time`
 - `latest_candle_age_seconds`
 - `latest_tick_time`

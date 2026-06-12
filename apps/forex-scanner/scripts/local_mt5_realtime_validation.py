@@ -108,6 +108,7 @@ class ValidationReport:
     account_info_available: bool
     terminal_info_available: bool
     symbol_selected: dict[str, bool]
+    resolved_symbols: dict[str, str | None]
     latest_candle_time: dict[str, str | None]
     latest_candle_age_seconds: dict[str, float | None]
     latest_tick_time: dict[str, str | None]
@@ -208,13 +209,14 @@ def run_validation(config: ValidationConfig, mt5: object | None = None) -> Valid
 
     samples: list[ValidationSample] = []
     symbol_selected: dict[str, bool] = {symbol: False for symbol in config.symbols}
+    resolved_symbols: dict[str, str | None] = {symbol: None for symbol in config.symbols}
 
     if terminal_initialized and account_info_available:
         deadline = time.monotonic() + (config.duration_minutes * 60.0)
         first = True
         while first or time.monotonic() < deadline:
             first = False
-            samples.extend(_collect_samples(mt5, config, symbol_selected))
+            samples.extend(_collect_samples(mt5, config, symbol_selected, resolved_symbols))
             if config.duration_minutes <= 0 or config.interval_seconds <= 0 or time.monotonic() >= deadline:
                 break
             time.sleep(min(config.interval_seconds, max(0.0, deadline - time.monotonic())))
@@ -229,6 +231,7 @@ def run_validation(config: ValidationConfig, mt5: object | None = None) -> Valid
         account_info_available=account_info_available,
         terminal_info_available=terminal_info_available,
         symbol_selected=symbol_selected,
+        resolved_symbols=resolved_symbols,
         samples=samples,
         initial_blocking_reasons=blocking_reasons,
         initial_warnings=warnings,
@@ -275,6 +278,7 @@ def _empty_report(
         account_info_available=False,
         terminal_info_available=False,
         symbol_selected={symbol: False for symbol in config.symbols},
+        resolved_symbols={symbol: None for symbol in config.symbols},
         latest_candle_time={},
         latest_candle_age_seconds={},
         latest_tick_time={},
@@ -297,10 +301,16 @@ def _empty_report(
     return report
 
 
-def _collect_samples(mt5: object, config: ValidationConfig, symbol_selected: dict[str, bool]) -> list[ValidationSample]:
+def _collect_samples(
+    mt5: object,
+    config: ValidationConfig,
+    symbol_selected: dict[str, bool],
+    resolved_symbols: dict[str, str | None],
+) -> list[ValidationSample]:
     samples: list[ValidationSample] = []
     for logical_symbol in config.symbols:
         resolved_symbol = _resolve_symbol(mt5, logical_symbol)
+        resolved_symbols[logical_symbol] = resolved_symbol
         selected = False
         if resolved_symbol:
             selected = bool(_safe_call(mt5, "symbol_select", resolved_symbol, True, default=False))
@@ -328,6 +338,7 @@ def _sample_symbol_timeframe(
     bars = [] if not selected else _copy_rates(mt5, resolved_symbol, timeframe, count=64)
     tick = None if not selected else _safe_call(mt5, "symbol_info_tick", resolved_symbol)
     latency_ms = round((time.perf_counter() - latency_start) * 1000.0, 3)
+    provider_latency_ms = _provider_latency_ms(tick, bars)
 
     latest_candle_time = None
     latest_candle_age_seconds = None
@@ -380,7 +391,7 @@ def _sample_symbol_timeframe(
         missing_bars=missing_bars,
         duplicate_bars=duplicate_bars,
         latency_ms=latency_ms,
-        provider_latency_ms=latency_ms,
+        provider_latency_ms=provider_latency_ms,
         status=status,
         blocking_reasons=list(dict.fromkeys(blocking)),
         warnings=list(dict.fromkeys(warnings)),
@@ -418,6 +429,7 @@ def _build_report(
     account_info_available: bool,
     terminal_info_available: bool,
     symbol_selected: dict[str, bool],
+    resolved_symbols: dict[str, str | None],
     samples: list[ValidationSample],
     initial_blocking_reasons: list[str],
     initial_warnings: list[str],
@@ -448,6 +460,7 @@ def _build_report(
         account_info_available=account_info_available,
         terminal_info_available=terminal_info_available,
         symbol_selected=symbol_selected,
+        resolved_symbols=resolved_symbols,
         latest_candle_time={key: sample.latest_candle_time for key, sample in latest_by_key.items()},
         latest_candle_age_seconds={key: sample.latest_candle_age_seconds for key, sample in latest_by_key.items()},
         latest_tick_time={key: sample.latest_tick_time for key, sample in latest_by_key.items()},
@@ -652,6 +665,38 @@ def _bar_sort_key(bar: Any) -> float:
         return float(_bar_value(bar, "time"))
     except (TypeError, ValueError):
         return 0.0
+
+
+def _provider_latency_ms(tick: Any, bars: list[Any]) -> float | None:
+    timestamps: list[float] = []
+    tick_timestamp = _tick_timestamp(tick)
+    if tick_timestamp is not None:
+        timestamps.append(tick_timestamp)
+    if bars:
+        try:
+            timestamps.append(float(_bar_value(bars[-1], "time")))
+        except (TypeError, ValueError):
+            pass
+    if not timestamps:
+        return None
+    latest = max(timestamps)
+    if latest > 10_000_000_000:
+        latest /= 1000.0
+    age_ms = max(0.0, (datetime.now(timezone.utc).timestamp() - latest) * 1000.0)
+    return round(age_ms, 3)
+
+
+def _tick_timestamp(tick: Any) -> float | None:
+    if tick is None:
+        return None
+    if isinstance(tick, dict):
+        value = tick.get("time_msc") or tick.get("time")
+    else:
+        value = getattr(tick, "time_msc", None) or getattr(tick, "time", None)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _safe_ratio(numerator: float | None, denominator: float | None) -> float | None:
