@@ -58,3 +58,4 @@ jobs:
           python -m pytest tests/test_market_sessions.py
           python -m pytest tests/test_session_aware_scanning.py
           python -m pytest tests/test_session_wait_mode.py
+          python -m pytest tests/test_operator_dashboard.py
