@@ -73,7 +73,7 @@ The CLI performs only local market-data reads:
 4. Reads terminal information.
 5. Resolves logical symbols to MT5 symbols.
 6. Selects symbols in Market Watch.
-7. Reads latest M1/M5 or requested timeframe candles.
+7. Reads latest M1/M5 or requested timeframe candles and normalizes returned bars by timestamp before freshness/gap checks.
 8. Reads the latest tick when available.
 9. Computes latest candle age.
 10. Computes spread from bid/ask.
