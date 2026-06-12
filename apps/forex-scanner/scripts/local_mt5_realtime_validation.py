@@ -395,9 +395,10 @@ def _copy_rates(mt5: object, symbol: str, timeframe: str, *, count: int) -> list
     if values is None:
         return []
     try:
-        return list(values)
+        bars = list(values)
     except TypeError:
         return []
+    return sorted(bars, key=_bar_sort_key)
 
 
 def _resolve_symbol(mt5: object, logical_symbol: str) -> str | None:
@@ -643,7 +644,14 @@ def _bar_times(bars: list[Any]) -> list[int]:
             values.append(int(float(_bar_value(bar, "time"))))
         except (TypeError, ValueError):
             continue
-    return values
+    return sorted(values)
+
+
+def _bar_sort_key(bar: Any) -> float:
+    try:
+        return float(_bar_value(bar, "time"))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _safe_ratio(numerator: float | None, denominator: float | None) -> float | None:

@@ -145,6 +145,22 @@ def test_bounded_duration_repeats_polling_without_infinite_loop(tmp_path: Path, 
     assert len(mt5.selected) == 2
 
 
+def test_descending_mt5_bars_are_normalized_before_freshness_and_gap_checks(tmp_path: Path):
+    module = load_module()
+
+    class DescendingBarsMT5(FakeMT5):
+        def copy_rates_from_pos(self, symbol, timeframe, start_pos, count):
+            return list(reversed(super().copy_rates_from_pos(symbol, timeframe, start_pos, count)))
+
+    report = module.run_validation(make_config(module, tmp_path), mt5=DescendingBarsMT5())
+
+    assert report.final_status == module.STATUS_READY
+    assert report.sample_count == 1
+    assert report.missing_bars["EUR/USD:M1"] == 0
+    assert report.duplicate_bars["EUR/USD:M1"] == 0
+    assert report.latest_candle_age_seconds["EUR/USD:M1"] < 180
+
+
 def test_missing_mt5_is_ci_safe_and_exports_blocked_report(tmp_path: Path, monkeypatch):
     module = load_module()
     monkeypatch.setattr(module, "import_mt5", lambda: None)
