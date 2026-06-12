@@ -286,7 +286,8 @@ python scripts/export_paper_session_bundle.py --reports-dir reports --output-dir
 The exporter writes `reports/bundles/<session-name>.zip`,
 `reports/bundles/<session-name>_manifest.json`, and
 `reports/bundles/<session-name>_manifest.txt`. It only reads existing reports,
-computes SHA-256 checksums, records missing required and optional reports, and
+computes SHA-256 checksums, records missing required and optional reports
+(unless `--no-include-optional` is used for a required-only bundle), and
 propagates the operator dashboard status when `operator_dashboard_summary.json`
 exists. It does **not** run trading logic, call MT5, call `order_send`, submit
 broker orders, mutate `.env`, or authorize live trading. See

@@ -151,6 +151,26 @@ def test_manifest_json_and_txt_are_written(tmp_path: Path) -> None:
         assert section in text
 
 
+def test_include_optional_false_omits_optional_gap_tracking(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    required_subset = ("operator_dashboard_summary.json", "operator_dashboard_report.txt")
+    write_reports(reports_dir, filenames=required_subset, with_dashboard=True)
+
+    manifest = build_paper_session_bundle(
+        reports_dir,
+        reports_dir / "bundles",
+        "required-only",
+        now=NOW,
+        include_optional=False,
+    )
+
+    expected_missing_required = [
+        filename for filename in REQUIRED_PAPER_SESSION_REPORTS if filename not in required_subset
+    ]
+    assert manifest["missing_files"] == expected_missing_required
+    assert manifest["optional_missing_files"] == []
+    assert {entry["path"] for entry in manifest["included_files"]} == set(required_subset)
+
 def test_strict_mode_blocks_when_required_reports_are_missing(tmp_path: Path) -> None:
     reports_dir = tmp_path / "reports"
     write_reports(reports_dir)
