@@ -318,6 +318,7 @@ class RealtimePaperSupervisorService:
                 positions_closed += cycle_positions_closed
                 partial_exits_created += cycle_partials
 
+            # Re-check safety after autonomous work and optional position management so heartbeat counters remain auditable.
             post_cycle_drift_reasons = realtime_safety_drift_reasons(self.settings)
             if post_cycle_drift_reasons:
                 stop_reason = RealtimePaperStopReason.BLOCKED_BY_SAFETY_DRIFT.value
