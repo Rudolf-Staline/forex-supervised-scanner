@@ -60,3 +60,5 @@ jobs:
           python -m pytest tests/test_session_wait_mode.py
           python -m pytest tests/test_operator_dashboard.py
           python -m pytest tests/test_session_bundle.py
+          python -m pytest tests/test_paper_performance.py
+          python -m pytest tests/test_paper_session_review.py
