@@ -70,6 +70,9 @@ python -m pytest tests/test_session_wait_mode.py
 - Les tests cloud utilisent mocks, stubs ou skips.
 - Ne jamais stocker d'identifiants broker dans le repo.
 
+## Documentation Index
+
+For a central map of the paper/demo operator stack, safety layers, realtime workflow, reporting tools, analytics, audits, and smoke commands, see [`docs/index.md`](docs/index.md).
 
 ## Local MT5 realtime validation runbook
 
