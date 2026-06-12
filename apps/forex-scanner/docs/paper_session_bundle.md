@@ -22,7 +22,7 @@ Options:
 | `--reports-dir` | `reports` | Directory containing existing report artifacts to read. |
 | `--output-dir` | `reports/bundles` | Directory where the ZIP and manifests are written. |
 | `--session-name` | required | Safe bundle name using letters, digits, `.`, `_`, or `-`. |
-| `--include-optional` | enabled | Includes optional autonomous companion reports when present and records optional gaps separately. |
+| `--include-optional` / `--no-include-optional` | enabled | Includes optional autonomous companion reports when present and records optional gaps separately; use `--no-include-optional` for a required-only bundle. |
 | `--strict` | off | Exits non-zero when any required bundle report is missing. |
 
 The exporter is bounded and one-shot; it is not a daemon and has no infinite
