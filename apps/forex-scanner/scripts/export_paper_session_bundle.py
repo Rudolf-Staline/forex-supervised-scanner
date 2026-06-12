@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.reporting.session_bundle import build_paper_session_bundle, render_manifest_txt
+from app.reporting.session_bundle import PaperSessionBundleStrictError, build_paper_session_bundle, render_manifest_txt
 
 SAFETY_BANNER = "SAFETY: paper session bundle export is read-only and paper/demo only; no trading logic, no MT5, no order_send, no .env mutation."
 
@@ -26,7 +26,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reports-dir", default="reports", help="Directory containing report artifacts")
     parser.add_argument("--output-dir", default="reports/bundles", help="Directory for the bundle zip and manifests")
     parser.add_argument("--session-name", required=True, help="Bundle name (letters, digits, '.', '_', '-')")
-    parser.add_argument("--strict", action="store_true", help="Exit non-zero when the bundle would be empty")
+    parser.add_argument(
+        "--include-optional",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include optional paper/demo companion reports when present and record optional gaps",
+    )
+    parser.add_argument("--strict", action="store_true", help="Exit non-zero when required bundle reports are missing")
     return parser
 
 
@@ -35,7 +41,16 @@ def main(argv: list[str] | None = None) -> int:
     print(SAFETY_BANNER)
 
     try:
-        manifest = build_paper_session_bundle(Path(args.reports_dir), Path(args.output_dir), args.session_name)
+        manifest = build_paper_session_bundle(
+            Path(args.reports_dir),
+            Path(args.output_dir),
+            args.session_name,
+            include_optional=args.include_optional,
+            strict=args.strict,
+        )
+    except PaperSessionBundleStrictError as error:
+        print(f"error: {error}")
+        return 1
     except ValueError as error:
         print(f"error: {error}")
         return 2
@@ -44,9 +59,6 @@ def main(argv: list[str] | None = None) -> int:
     for label, path in manifest["output_paths"].items():
         print(f"{label}={path}")
 
-    if args.strict and not manifest["included_files"]:
-        print("strict mode: failing because the bundle is empty")
-        return 1
     return 0
 
 

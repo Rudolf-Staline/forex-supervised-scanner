@@ -101,3 +101,19 @@ python -m pytest -q tests/test_operator_dashboard.py
 
 The tests run offline, require no MT5, and assert that the dashboard performs
 no live trading, no `order_send`, and no `.env` mutation.
+
+## Paper session bundle handoff
+
+After reviewing the operator dashboard, operators can export a portable
+paper/demo archive for manual audit:
+
+```bash
+python scripts/export_paper_session_bundle.py --reports-dir reports --output-dir reports/bundles --session-name paper-session-smoke
+```
+
+The bundle exporter reads `operator_dashboard_summary.json` when present and
+copies its `final_operator_status`, `blocking_reasons`, `warnings`, and safety
+flags into the session manifest. The exporter is archive-only: it does not run
+trading logic, does not call MT5, does not call `order_send`, does not submit
+broker orders, and does not mutate `.env`. A passing dashboard or bundle is
+review evidence only and must never be treated as live-trading authorization.

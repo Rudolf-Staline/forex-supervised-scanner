@@ -285,3 +285,22 @@ This runbook validates and documents **paper/demo readiness only**. It does not
 enable live trading, does not authorize real-money trading, and keeps MT5
 validation read-only. Real-money decisions require a separate manual review
 process that is intentionally **not** part of this repository.
+
+## Archive the paper/demo session bundle
+
+After completing the local paper/demo report review, export an auditable bundle
+for manual review or archival:
+
+```bash
+python scripts/export_paper_session_bundle.py --reports-dir reports --output-dir reports/bundles --session-name paper-session-smoke
+```
+
+This step is read-only with respect to trading and report sources. It packages
+existing JSON/TXT/CSV/JSONL reports, writes a ZIP plus JSON/TXT manifests,
+computes SHA-256 checksums, records missing required and optional artifacts, and
+propagates the operator dashboard final status when available. It does not call
+MT5, does not call `order_send`, does not submit broker orders, does not run a
+daemon, and does not mutate `.env`.
+
+The bundle is evidence for human audit only. Even if all included reports pass,
+that does **not** authorize live trading or broker-live execution.

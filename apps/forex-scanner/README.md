@@ -276,10 +276,18 @@ The dashboard is strictly read-only and works offline: no trading logic, no MT5,
 
 ## Paper Session Bundle Export
 
-Package the relevant paper/demo reports into one auditable zip with a checksummed manifest:
+For an auditable paper/demo handoff, package the existing report artifacts into
+a read-only archive:
 
 ```bash
 python scripts/export_paper_session_bundle.py --reports-dir reports --output-dir reports/bundles --session-name paper-session-smoke
 ```
 
-Outputs `reports/bundles/<session-name>.zip`, `<session-name>_manifest.json`, and `<session-name>_manifest.txt`, with per-file sha256 checksums, missing-file detection, and the dashboard's `final_operator_status` when `operator_dashboard_summary.json` is present. The bundler is read-only and paper/demo only: no trading, no MT5, no `order_send`, no `.env` mutation. See [`docs/paper_session_bundle.md`](docs/paper_session_bundle.md).
+The exporter writes `reports/bundles/<session-name>.zip`,
+`reports/bundles/<session-name>_manifest.json`, and
+`reports/bundles/<session-name>_manifest.txt`. It only reads existing reports,
+computes SHA-256 checksums, records missing required and optional reports, and
+propagates the operator dashboard status when `operator_dashboard_summary.json`
+exists. It does **not** run trading logic, call MT5, call `order_send`, submit
+broker orders, mutate `.env`, or authorize live trading. See
+[`docs/paper_session_bundle.md`](docs/paper_session_bundle.md).
