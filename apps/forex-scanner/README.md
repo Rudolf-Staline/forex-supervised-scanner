@@ -79,7 +79,7 @@ Local Windows operators can validate MetaTrader 5 realtime market-data readiness
 python scripts/local_mt5_realtime_validation.py --symbols EUR/USD GBP/USD --timeframes M1 M5 --duration-minutes 15 --interval-seconds 30 --export-json --export-txt
 ```
 
-This command is local-only and Windows/MT5-dependent. It performs read-only checks for MT5 import, terminal/account/terminal-info reads, symbol resolution and selection, latest candles and ticks, candle age, spread, spread/ATR, missing or duplicate bars, latency, and bounded repeated polling. It validates market-data readiness only; it does not authorize live trading, does not call `order_send`, does not submit broker orders, does not mutate `.env`, does not run as a daemon, and has no infinite loop. CI uses mocks/stubs only and does not require real MT5; without `--strict`, missing MT5 writes a blocked report instead of failing the process.
+This command is local-only and Windows/MT5-dependent. It performs read-only checks for MT5 import, terminal/account/terminal-info reads, symbol resolution and selection, latest candles and ticks, candle age, spread, spread/ATR, missing or duplicate bars, provider latency (`provider_latency_ms`), and bounded repeated polling. It validates market-data readiness only; it does not authorize live trading, does not call `order_send`, does not submit broker orders, does not mutate `.env`, does not run as a daemon, and has no infinite loop. CI uses mocks/stubs only and does not require real MT5; without `--strict`, missing MT5 writes a blocked report instead of failing the process.
 
 Expected exports when enabled:
 

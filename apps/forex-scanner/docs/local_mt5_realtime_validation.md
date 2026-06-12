@@ -81,7 +81,7 @@ The CLI performs only local market-data reads:
 12. Computes spread/ATR when possible.
 13. Detects missing bars.
 14. Detects duplicate bars.
-15. Measures provider latency in milliseconds.
+15. Measures provider latency in milliseconds and records it as both `latency_ms` and `provider_latency_ms` for report readability.
 16. Repeats polling for the bounded duration only.
 
 ## Expected reports
@@ -114,6 +114,7 @@ Reports include:
 - `missing_bars`
 - `duplicate_bars`
 - `latency_ms`
+- `provider_latency_ms`
 - `sample_count`
 - `final_status`
 - `blocking_reasons`
