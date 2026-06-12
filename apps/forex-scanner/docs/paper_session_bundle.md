@@ -102,3 +102,14 @@ manifest records that the final operator status is unavailable.
 ```bash
 python -m pytest -q tests/test_session_bundle.py
 ```
+
+## Including paper performance analytics
+
+Paper Performance Analytics can be generated before exporting a bundle so the JSON/TXT reports are available alongside other session evidence:
+
+```bash
+python scripts/paper_performance_report.py --reports-dir reports --export-json --export-txt
+python scripts/export_paper_session_bundle.py --reports-dir reports --output-dir reports/bundles --session-name paper-session-smoke
+```
+
+The analytics step reads existing report artifacts and the existing local paper-order store when present. It does not run strategies, does not call MT5, does not call `order_send`, does not submit broker orders, and does not authorize live trading. The resulting metrics are diagnostic paper/demo evidence only.

@@ -292,3 +292,13 @@ propagates the operator dashboard status when `operator_dashboard_summary.json`
 exists. It does **not** run trading logic, call MT5, call `order_send`, submit
 broker orders, mutate `.env`, or authorize live trading. See
 [`docs/paper_session_bundle.md`](docs/paper_session_bundle.md).
+
+## Paper Performance Analytics
+
+Paper Performance Analytics summarizes completed local paper/demo sessions from existing report artifacts only:
+
+```bash
+python scripts/paper_performance_report.py --reports-dir reports --export-json --export-txt
+```
+
+It reads local paper/demo reports and the existing local `paper_orders` store when present. It does not run strategies, does not call MT5, does not call `order_send`, does not submit broker orders, does not mutate `.env`, and does not authorize live trading. Outputs are diagnostic evidence only: `reports/paper_performance_summary.json` and `reports/paper_performance_report.txt`. See [`docs/paper_performance.md`](docs/paper_performance.md).
