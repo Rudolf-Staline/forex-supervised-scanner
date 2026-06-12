@@ -139,7 +139,8 @@ def test_paper_executor_tracks_partial_open_trade_and_breakeven_stop(settings) -
     assert updated.status == OrderStatus.PARTIALLY_CLOSED
     assert updated.tp1_exit_price is not None
     assert updated.remaining_fraction < 1.0
-    assert updated.request.stop_loss == updated.request.entry_price
+    assert updated.request.stop_loss < updated.request.entry_price
+    assert updated.current_stop_loss == updated.request.entry_price
     assert updated.stop_movements
     assert any(event.event_type == TradeEventType.STOP_MOVED for event in updated.events)
 

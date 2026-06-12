@@ -300,3 +300,68 @@ def test_no_mt5_required_in_ci(settings, tmp_path: Path, monkeypatch):
     service = RealtimePaperSupervisorService(settings, DummyProvider(), DummyDB(), data_health_service=FakeDataHealth([RealtimeDataHealthStatus.REALTIME_DATA_READY]))
     report = service.run(config(tmp_path, max_cycles=1))
     assert report.data_health_status == RealtimeDataHealthStatus.REALTIME_DATA_READY.value
+
+
+def test_post_cycle_safety_drift_preserves_position_counters(settings, tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        "app.execution.realtime_paper_supervisor.build_evidence",
+        lambda *a, **k: DummyEvidence(final_status=AutonomousEvidenceFinalStatus.READY_EVIDENCE),
+    )
+    patch_ready(monkeypatch)
+    monkeypatch.setattr(
+        "app.execution.realtime_paper_supervisor.AutonomousPolicyEngine",
+        lambda: SimpleNamespace(
+            can_run_supervisor_cycle=lambda ctx: SimpleNamespace(
+                decision=SimpleNamespace(value="ALLOW"),
+                allowed=True,
+                blocking_reasons=[],
+            )
+        ),
+    )
+
+    class PositionManager:
+        def evaluate_position_lifecycle(self, config):
+            return SimpleNamespace(
+                positions_updated=3,
+                positions_closed=2,
+                partial_exits_created=1,
+                model_dump=lambda mode="json": {
+                    "positions_updated": 3,
+                    "positions_closed": 2,
+                    "partial_exits_created": 1,
+                },
+            )
+
+    def autonomous_runner(config):
+        monkeypatch.setenv("ALLOW_LIVE_TRADING", "true")
+        return 2
+
+    cfg = config(tmp_path, max_cycles=1).model_copy(update={"dry_run": False, "manage_positions": True})
+    service = RealtimePaperSupervisorService(
+        settings,
+        DummyProvider(),
+        DummyDB(),
+        data_health_service=FakeDataHealth([RealtimeDataHealthStatus.REALTIME_DATA_READY]),
+        autonomous_runner=autonomous_runner,
+        position_manager=PositionManager(),
+    )
+    report = service.run(cfg)
+
+    assert report.stop_reason == RealtimePaperStopReason.BLOCKED_BY_SAFETY_DRIFT.value
+    assert report.paper_orders_created == 2
+    assert report.positions_updated == 3
+    assert report.positions_closed == 2
+    assert report.partial_exits_created == 1
+    assert report.cycles[0].stop_reason == RealtimePaperStopReason.BLOCKED_BY_SAFETY_DRIFT.value
+    assert report.cycles[0].paper_orders_created == 2
+    assert report.cycles[0].positions_updated == 3
+    assert report.cycles[0].positions_closed == 2
+    assert report.cycles[0].partial_exits_created == 1
+    assert any("ALLOW_LIVE_TRADING" in reason for reason in report.blocking_reasons)
+
+    heartbeat = json.loads((tmp_path / "realtime_heartbeat.jsonl").read_text(encoding="utf-8").strip())
+    assert heartbeat["stop_reason"] == RealtimePaperStopReason.BLOCKED_BY_SAFETY_DRIFT.value
+    assert heartbeat["paper_orders_created"] == 2
+    assert heartbeat["positions_updated"] == 3
+    assert heartbeat["positions_closed"] == 2
+    assert heartbeat["partial_exits_created"] == 1

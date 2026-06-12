@@ -288,6 +288,7 @@ class ExecutionOrder(BaseModel):
     closed_at: datetime | None = None
     simulated_entry: float | None = Field(default=None, gt=0.0)
     initial_stop_loss: float | None = Field(default=None, gt=0.0)
+    current_stop_loss: float | None = Field(default=None, gt=0.0)
     exit_price: float | None = Field(default=None, gt=0.0)
     tp1_exit_price: float | None = Field(default=None, gt=0.0)
     tp2_exit_price: float | None = Field(default=None, gt=0.0)

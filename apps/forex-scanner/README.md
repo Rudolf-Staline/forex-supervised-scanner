@@ -199,3 +199,21 @@ python scripts/realtime_paper_supervisor.py --provider mt5 --symbols EUR/USD --t
 Local MT5 validation requires a configured local MetaTrader 5 terminal. CI and cloud tests do not require MT5 and should use mocks or the synthetic CLI smoke path. Synthetic fallback is intentionally blocked for realtime paper mode, so an MT5 failure cannot be silently treated as live-quality market data.
 
 Realtime paper/demo operation is not live trading: it validates real market data, safety gates, readiness, policy, and paper-only supervisor behavior without broker-live execution. This repository still does **not** authorize live trading, does not add broker-live execution, and the realtime paper layer does not call `order_send`.
+
+### Realtime paper position manager
+
+Local paper orders can be advanced through their realtime paper lifecycle without enabling live trading:
+
+```bash
+python scripts/realtime_paper_positions.py --provider synthetic --symbols EUR/USD --timeframe M1 --dry-run --export-json --export-txt
+```
+
+The manager updates pending/open local paper orders from fresh candles, records auditable activation/partial/stop/target/breakeven/cancel events, and exports `reports/realtime_paper_positions.json` plus `reports/realtime_paper_positions.txt`. Use `--dry-run` to preview lifecycle effects without persisting order changes. It remains strictly paper/demo: no broker-live execution, no `order_send`, no `.env` mutation, no daemon, and no MT5 requirement in CI.
+
+The realtime paper supervisor can include lifecycle management after data health, safety heartbeat, evidence, readiness, and policy checks:
+
+```bash
+python scripts/realtime_paper_supervisor.py --provider synthetic --symbols EUR/USD --timeframe M1 --interval-seconds 0 --max-cycles 1 --dry-run --manage-positions --export-json --export-txt
+```
+
+Supervisor output includes a `position_lifecycle_summary` with position update, closure, and partial-exit counts when `--manage-positions` is enabled.

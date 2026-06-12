@@ -78,3 +78,38 @@ Safety drift is checked at cycle start and again before a successful cycle heart
 ## Realtime paper vs live trading
 
 Realtime paper/demo mode consumes current market data and may run paper-only autonomous checks. Live trading would submit broker-live orders. This readiness layer remains paper/demo only and still does **not** authorize live trading.
+
+## Realtime paper position lifecycle manager
+
+The realtime paper position manager advances **local paper orders only** after a paper order already exists. It models the lifecycle:
+
+```text
+signal -> paper order -> activation -> open position -> TP/SL/partial exits -> breakeven -> close/cancel -> audit
+```
+
+It supports pending entry activation, setup invalidation before activation, stop-loss and take-profit closure, TP1/TP2/TP3 partial exits, breakeven stop movement after TP1 when configured, stale-data blocking, session-close warnings, spread-too-wide warnings or blocking, configured gap-through-entry behavior, and conservative stop-first processing when a candle gaps through both stop and target.
+
+Run it directly:
+
+```bash
+python scripts/realtime_paper_positions.py --provider synthetic --symbols EUR/USD --timeframe M1 --dry-run --export-json --export-txt
+```
+
+Expected exports:
+
+- `reports/realtime_paper_positions.json`
+- `reports/realtime_paper_positions.txt`
+
+The report includes `started_at`, `completed_at`, `provider`, `symbols`, `timeframe`, `positions_seen`, `pending_orders_seen`, `positions_updated`, `positions_closed`, `partial_exits_created`, `breakeven_moves`, `invalidations`, `warnings`, `blocking_reasons`, `safety_flags`, and `output_paths`.
+
+The manager never calls `order_send`, never enables live trading, never mutates `.env`, never creates a daemon, and does not require MT5 in CI. `--dry-run` evaluates lifecycle transitions and writes reports without persisting destructive paper-order updates.
+
+## Supervisor-managed positions
+
+The bounded realtime paper supervisor can optionally run the position manager after data health, safety heartbeat, evidence, readiness, and policy checks:
+
+```bash
+python scripts/realtime_paper_supervisor.py --provider synthetic --symbols EUR/USD --timeframe M1 --interval-seconds 0 --max-cycles 1 --dry-run --manage-positions --export-json --export-txt
+```
+
+When `--manage-positions` is present, supervisor reports include a `position_lifecycle_summary` plus per-cycle counts for `positions_updated`, `positions_closed`, and `partial_exits_created`, while still remaining paper/demo-only.

@@ -28,6 +28,7 @@ from app.execution.autonomous_policy import AutonomousPolicyContext, AutonomousP
 from app.execution.autonomous_readiness import AutonomousReadinessConfig, AutonomousReadinessFinalStatus, build_readiness_report
 from app.execution.autonomous_recovery import AutonomousRecoveryConfig, build_recovery_plan
 from app.execution.autonomous_supervisor import AutonomousSupervisorConfig, AutonomousSupervisorService
+from app.execution.realtime_paper_positions import RealtimePaperPositionConfig, RealtimePaperPositionManagerService, RealtimePaperPositionReport
 from app.execution.realtime_data_health import (
     RealtimeDataHealthConfig,
     RealtimeDataHealthReport,
@@ -75,6 +76,7 @@ class RealtimePaperSupervisorConfig(BaseModel):
     min_data_quality_score: float = Field(default=75.0, ge=0.0, le=100.0)
     warn_data_quality_score: float = Field(default=90.0, ge=0.0, le=100.0)
     max_spread_atr_ratio: float = Field(default=0.25, gt=0.0, le=10.0)
+    manage_positions: bool = False
 
     @field_validator("symbols")
     @classmethod
@@ -99,6 +101,9 @@ class RealtimeCycleRecord(BaseModel):
     policy_decision: str
     evidence_status: str = "UNKNOWN"
     paper_orders_created: int = 0
+    positions_updated: int = 0
+    positions_closed: int = 0
+    partial_exits_created: int = 0
     stop_reason: str | None = None
     safety_flags: dict[str, object] = Field(default_factory=dict)
     operator_controls: dict[str, object] = Field(default_factory=dict)
@@ -121,12 +126,17 @@ class RealtimePaperSupervisorReport(BaseModel):
     cycles_attempted: int
     cycles_completed: int
     paper_orders_created: int
+    positions_updated: int = 0
+    positions_closed: int = 0
+    partial_exits_created: int = 0
     stop_reason: str
     safety_flags: dict[str, object]
     operator_controls: dict[str, object]
     output_paths: dict[str, str] = Field(default_factory=dict)
     cycles: list[RealtimeCycleRecord] = Field(default_factory=list)
     data_health_report: dict[str, object] | None = None
+    position_report: dict[str, object] | None = None
+    position_lifecycle_summary: dict[str, object] = Field(default_factory=dict)
     readiness_report: dict[str, object] | None = None
     evidence_report: dict[str, object] | None = None
     blocking_reasons: list[str] = Field(default_factory=list)
@@ -143,6 +153,7 @@ class RealtimePaperSupervisorService:
         sleep_fn: Callable[[float], None] | None = None,
         data_health_service: RealtimeDataHealthService | None = None,
         autonomous_runner: Callable[[RealtimePaperSupervisorConfig], int] | None = None,
+        position_manager: RealtimePaperPositionManagerService | None = None,
     ) -> None:
         self.settings = settings
         self.provider = provider
@@ -151,6 +162,7 @@ class RealtimePaperSupervisorService:
         self.sleep_fn = sleep_fn or time.sleep
         self.data_health_service = data_health_service or RealtimeDataHealthService(provider, now_fn=self.now_fn)
         self.autonomous_runner = autonomous_runner
+        self.position_manager = position_manager
 
     def run(self, config: RealtimePaperSupervisorConfig) -> RealtimePaperSupervisorReport:
         started_at = self.now_fn()
@@ -168,6 +180,10 @@ class RealtimePaperSupervisorService:
         evidence_payload: dict[str, object] | None = None
         provider_failures = 0
         orders_created = 0
+        positions_updated = 0
+        positions_closed = 0
+        partial_exits_created = 0
+        position_payload: dict[str, object] | None = None
         blocking_reasons: list[str] = []
 
         deadline_seconds = config.max_runtime_minutes * 60.0 if config.max_runtime_minutes is not None else None
@@ -279,6 +295,30 @@ class RealtimePaperSupervisorService:
 
             cycle_orders = self._run_autonomous_if_allowed(config)
             orders_created += cycle_orders
+            cycle_positions_updated = 0
+            cycle_positions_closed = 0
+            cycle_partials = 0
+            if config.manage_positions:
+                position_report = self._position_manager().evaluate_position_lifecycle(RealtimePaperPositionConfig(
+                    provider=config.provider,
+                    symbols=config.symbols,
+                    timeframe=config.timeframe,
+                    dry_run=config.dry_run,
+                    export_json=config.export_json,
+                    export_txt=config.export_txt,
+                    reports_dir=config.reports_dir,
+                    max_age_seconds=config.max_data_age_seconds,
+                    max_spread_atr_ratio=config.max_spread_atr_ratio,
+                ))
+                position_payload = position_report.model_dump(mode="json")
+                cycle_positions_updated = position_report.positions_updated
+                cycle_positions_closed = position_report.positions_closed
+                cycle_partials = position_report.partial_exits_created
+                positions_updated += cycle_positions_updated
+                positions_closed += cycle_positions_closed
+                partial_exits_created += cycle_partials
+
+            # Re-check safety after autonomous work and optional position management so heartbeat counters remain auditable.
             post_cycle_drift_reasons = realtime_safety_drift_reasons(self.settings)
             if post_cycle_drift_reasons:
                 stop_reason = RealtimePaperStopReason.BLOCKED_BY_SAFETY_DRIFT.value
@@ -294,11 +334,15 @@ class RealtimePaperSupervisorService:
                     controls,
                     cycle_orders,
                     evidence_status=evidence_status,
+                    positions_updated=cycle_positions_updated,
+                    positions_closed=cycle_positions_closed,
+                    partial_exits_created=cycle_partials,
                 )
                 self._write_heartbeat(heartbeat_path, run_id, record)
                 cycles.append(record)
                 break
-            record = self._record(cycle_number, cycle_started, data_report.status.value, readiness_status, policy_label, None, [], controls, cycle_orders, evidence_status=evidence_status)
+
+            record = self._record(cycle_number, cycle_started, data_report.status.value, readiness_status, policy_label, None, [], controls, cycle_orders, evidence_status=evidence_status, positions_updated=cycle_positions_updated, positions_closed=cycle_positions_closed, partial_exits_created=cycle_partials)
             self._write_heartbeat(heartbeat_path, run_id, record)
             cycles.append(record)
             if deadline_seconds is not None and (self.now_fn() - started_at).total_seconds() >= deadline_seconds:
@@ -331,12 +375,22 @@ class RealtimePaperSupervisorService:
             cycles_attempted=len(cycles),
             cycles_completed=sum(1 for cycle in cycles if cycle.stop_reason is None),
             paper_orders_created=orders_created,
+            positions_updated=positions_updated,
+            positions_closed=positions_closed,
+            partial_exits_created=partial_exits_created,
             stop_reason=stop_reason,
             safety_flags=realtime_safety_flags(self.settings),
             operator_controls=self._operator_controls(),
             output_paths=output_paths,
             cycles=cycles,
             data_health_report=data_report.model_dump(mode="json") if data_report else None,
+            position_report=position_payload,
+            position_lifecycle_summary={
+                "manage_positions": config.manage_positions,
+                "positions_updated": positions_updated,
+                "positions_closed": positions_closed,
+                "partial_exits_created": partial_exits_created,
+            },
             readiness_report=readiness_payload,
             evidence_report=evidence_payload,
             blocking_reasons=blocking_reasons,
@@ -374,7 +428,7 @@ class RealtimePaperSupervisorService:
                 "degraded_mode": _env_bool("OPERATOR_DEGRADED_MODE"),
             }
 
-    def _record(self, cycle: int, started_at: datetime, data_status: str, readiness: str, policy: str, stop: str | None, reasons: list[str], controls: dict[str, object], orders: int, *, evidence_status: str = "UNKNOWN") -> RealtimeCycleRecord:
+    def _record(self, cycle: int, started_at: datetime, data_status: str, readiness: str, policy: str, stop: str | None, reasons: list[str], controls: dict[str, object], orders: int, *, evidence_status: str = "UNKNOWN", positions_updated: int = 0, positions_closed: int = 0, partial_exits_created: int = 0) -> RealtimeCycleRecord:
         return RealtimeCycleRecord(
             cycle=cycle,
             started_at=started_at,
@@ -384,11 +438,19 @@ class RealtimePaperSupervisorService:
             policy_decision=policy,
             evidence_status=evidence_status,
             paper_orders_created=orders,
+            positions_updated=positions_updated,
+            positions_closed=positions_closed,
+            partial_exits_created=partial_exits_created,
             stop_reason=stop,
             safety_flags=realtime_safety_flags(self.settings),
             operator_controls=controls,
             blocking_reasons=reasons,
         )
+
+    def _position_manager(self) -> RealtimePaperPositionManagerService:
+        if self.position_manager is None:
+            self.position_manager = RealtimePaperPositionManagerService(self.settings, self.provider, self.database, now_fn=self.now_fn)
+        return self.position_manager
 
     def _write_heartbeat(self, path: Path, run_id: str, record: RealtimeCycleRecord) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -472,6 +534,9 @@ def export_realtime_paper_supervisor_txt(report: RealtimePaperSupervisorReport, 
         f"cycles_attempted={report.cycles_attempted}",
         f"cycles_completed={report.cycles_completed}",
         f"paper_orders_created={report.paper_orders_created}",
+        f"positions_updated={report.positions_updated}",
+        f"positions_closed={report.positions_closed}",
+        f"partial_exits_created={report.partial_exits_created}",
     ]
     for reason in report.blocking_reasons:
         lines.append(f"block={reason}")
