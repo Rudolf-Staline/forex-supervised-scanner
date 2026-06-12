@@ -217,3 +217,19 @@ python scripts/realtime_paper_supervisor.py --provider synthetic --symbols EUR/U
 ```
 
 Supervisor output includes a `position_lifecycle_summary` with position update, closure, and partial-exit counts when `--manage-positions` is enabled.
+
+## Realtime Paper Command Center
+
+Use the Realtime Paper Command Center as the single bounded paper/demo entrypoint for realtime operation checks:
+
+```bash
+cd apps/forex-scanner
+python scripts/realtime_command_center.py --provider synthetic --symbols EUR/USD --timeframe M1 --dry-run --max-cycles 1 --export-json --export-txt
+```
+
+It coordinates safety heartbeat checks, realtime data health, evidence, readiness, policy, optional recovery planning, optional scenarios, realtime paper supervision, optional paper position management, and final reports:
+
+- `reports/realtime_command_center_summary.json`
+- `reports/realtime_command_center_report.txt`
+
+Synthetic data is allowed for diagnostics but blocks realtime paper operation by design. The command center remains paper/demo only: no live trading, no broker-live execution, no `order_send`, no `.env` mutation, no daemon, no infinite loop, and no MT5 requirement in CI. See [`docs/realtime_command_center.md`](docs/realtime_command_center.md).

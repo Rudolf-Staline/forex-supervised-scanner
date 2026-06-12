@@ -113,3 +113,18 @@ python scripts/realtime_paper_supervisor.py --provider synthetic --symbols EUR/U
 ```
 
 When `--manage-positions` is present, supervisor reports include a `position_lifecycle_summary` plus per-cycle counts for `positions_updated`, `positions_closed`, and `partial_exits_created`, while still remaining paper/demo-only.
+
+## Realtime Paper Command Center
+
+For day-to-day operator use, prefer the unified command center when you want one bounded paper/demo command to coordinate data health, evidence, readiness, policy, optional recovery planning, optional scenarios, supervisor execution, optional position lifecycle management, and final reporting:
+
+```bash
+python scripts/realtime_command_center.py --provider synthetic --symbols EUR/USD --timeframe M1 --dry-run --max-cycles 1 --export-json --export-txt
+```
+
+Expected command-center exports:
+
+- `reports/realtime_command_center_summary.json`
+- `reports/realtime_command_center_report.txt`
+
+The command center is still paper/demo only. Synthetic data remains diagnostic and blocks realtime paper operation with `BLOCKED_SYNTHETIC_FALLBACK`; MT5 is not required in CI; no live trading, broker-live execution, `.env` mutation, daemon, infinite loop, or broker order submission is added. See [`realtime_command_center.md`](realtime_command_center.md).
