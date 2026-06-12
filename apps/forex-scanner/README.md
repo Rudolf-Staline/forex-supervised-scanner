@@ -252,3 +252,11 @@ It coordinates safety heartbeat checks, realtime data health, evidence, readines
 - `reports/realtime_command_center_report.txt`
 
 Synthetic data is allowed for diagnostics but blocks realtime paper operation by design. The command center remains paper/demo only: no live trading, no broker-live execution, no `order_send`, no `.env` mutation, no daemon, no infinite loop, and no MT5 requirement in CI. See [`docs/realtime_command_center.md`](docs/realtime_command_center.md).
+
+## Local Paper Operation Runbook
+
+For the complete, step-by-step local operator workflow — chaining read-only MT5 realtime validation, the Realtime Paper Command Center, the paper supervisor, the paper position manager, and the runtime safety heartbeat into one procedure with a copy-paste checklist and report-interpretation guide — use the Local Paper Operation Runbook:
+
+See [`docs/local_paper_operation_runbook.md`](docs/local_paper_operation_runbook.md).
+
+Use it when you want a single human-readable procedure for running the project locally in safe paper/demo mode and interpreting the resulting reports. It remains paper/demo only: it does not enable or authorize live trading, keeps MT5 validation read-only, and is not a go-live approval.
