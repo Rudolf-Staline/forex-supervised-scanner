@@ -46,6 +46,19 @@ The supervisor writes:
 
 The supervisor JSON/TXT summary includes `evidence_status`; heartbeat entries include per-cycle `evidence_status`, `heartbeat_sequence`, `runtime_safety_heartbeat`, `paper_demo_only`, and `live_execution_allowed=false` so operators can prove evidence ran before readiness and policy allowed paper-only supervision without live execution.
 
+
+## Local MT5 realtime validation before paper operation
+
+Before using local Windows MT5 market data for realtime paper/demo workflows, operators can run the read-only validation runbook:
+
+```bash
+python scripts/local_mt5_realtime_validation.py --symbols EUR/USD GBP/USD --timeframes M1 M5 --duration-minutes 15 --interval-seconds 30 --export-json --export-txt
+```
+
+The validation is local-only and Windows/MT5-dependent. It checks MT5 package import, terminal initialization, account and terminal info reads, symbol resolution and selection, latest requested timeframe candles, latest tick, candle age, spread, spread/ATR when possible, missing bars, duplicate bars, provider latency, and bounded repeated polling. It validates market-data readiness only; it does not authorize live trading, does not call `order_send`, does not submit broker orders, does not mutate `.env`, does not run as a daemon, and does not add live broker execution capability.
+
+CI must rely on mocks/stubs only. A real MT5 terminal is not required in CI, and the CLI remains CI-safe by returning a blocked report rather than failing solely because MT5 is absent unless `--strict` is explicitly supplied. See [`local_mt5_realtime_validation.md`](local_mt5_realtime_validation.md).
+
 ## Realtime data thresholds
 
 Both CLI entry points expose the same data-quality controls so operators can tighten local readiness checks without editing code or `.env`:
