@@ -69,7 +69,7 @@ Every cycle verifies:
 - `execution_capabilities.broker_live_enabled=false`
 - the live confirmation environment variable is unset
 
-Any drift stops the run with `BLOCKED_BY_SAFETY_DRIFT`.
+Safety drift is checked at cycle start and again before a successful cycle heartbeat is written, so a paper-only runner cannot finish a cycle after flipping a live-trading guard. Any drift stops the run with `BLOCKED_BY_SAFETY_DRIFT`.
 
 ## Local MT5 warning
 
