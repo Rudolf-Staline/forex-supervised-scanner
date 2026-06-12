@@ -22,6 +22,7 @@ The project remains **paper/demo only**:
 | Summarize all report artifacts | [`operator_dashboard.md`](operator_dashboard.md) |
 | Export an auditable paper/demo bundle | [`paper_session_bundle.md`](paper_session_bundle.md) |
 | Analyze paper/demo performance | [`paper_performance.md`](paper_performance.md) |
+| Run a post-session operator review | [`paper_session_review.md`](paper_session_review.md) |
 
 ## Safety and setup
 
@@ -66,6 +67,7 @@ Realtime paper/demo operation validates market data and paper-only behavior with
 | [`operator_dashboard.md`](operator_dashboard.md) | Offline read-only aggregation of paper/demo report artifacts into one operator status. |
 | [`paper_session_bundle.md`](paper_session_bundle.md) | ZIP bundle export with JSON/TXT manifests and SHA-256 checksums. |
 | [`paper_performance.md`](paper_performance.md) | Read-only analytics from paper/demo reports and local paper order artifacts. |
+| [`paper_session_review.md`](paper_session_review.md) | One post-session review command that composes dashboard, performance, and optional bundle export. |
 
 ## Audit and maintenance
 
@@ -79,13 +81,14 @@ Realtime paper/demo operation validates market data and paper-only behavior with
 Run from `apps/forex-scanner`.
 
 ```bash
-python -m pytest -q tests/test_operator_dashboard.py tests/test_session_bundle.py tests/test_paper_performance.py --maxfail=1
+python -m pytest -q tests/test_operator_dashboard.py tests/test_session_bundle.py tests/test_paper_performance.py tests/test_paper_session_review.py --maxfail=1
 ```
 
 ```bash
 python scripts/operator_dashboard.py --reports-dir reports --export-json --export-txt
 python scripts/export_paper_session_bundle.py --reports-dir reports --output-dir reports/bundles --session-name paper-session-smoke
 python scripts/paper_performance_report.py --reports-dir reports --export-json --export-txt
+python scripts/paper_session_review.py --reports-dir reports --export-json --export-txt --export-bundle --session-name paper-session-review
 ```
 
 ## Local MT5 commands
