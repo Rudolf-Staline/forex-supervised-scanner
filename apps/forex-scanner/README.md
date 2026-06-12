@@ -306,6 +306,16 @@ python scripts/paper_performance_report.py --reports-dir reports --export-json -
 
 It reads local paper/demo reports and the existing local `paper_orders` store when present. It does not run strategies, does not call MT5, does not call `order_send`, does not submit broker orders, does not mutate `.env`, and does not authorize live trading. Outputs are diagnostic evidence only: `reports/paper_performance_summary.json` and `reports/paper_performance_report.txt`. See [`docs/paper_performance.md`](docs/paper_performance.md).
 
+## Paper Session Review
+
+Paper Session Review runs a post-session operator handoff by composing the existing offline dashboard, performance analytics, and optional bundle export:
+
+```bash
+python scripts/paper_session_review.py --reports-dir reports --export-json --export-txt --export-bundle --session-name paper-session-review
+```
+
+It writes `reports/paper_session_review_summary.json` and `reports/paper_session_review_report.txt`, refreshes the dashboard/performance artifacts when exports are enabled, and can create an auditable bundle under `reports/bundles/`. It remains read-only and paper/demo only: no trading logic, no MT5 import, no `order_send`, no broker orders, no `.env` mutation, no daemon, and no live-trading authorization. See [`docs/paper_session_review.md`](docs/paper_session_review.md).
+
 ## Stale Issue Resolution Plan
 
 Several older GitHub issues remain open even though their requested paper/demo features appear to have landed through later merged PRs. The stale issue resolution plan documents the implementation evidence and gives manual closure recommendations.
