@@ -24,6 +24,7 @@ Entry points:
 - Python package: `apps/forex-scanner/app/`
 - Tests: `apps/forex-scanner/tests/`
 - Scripts: `apps/forex-scanner/scripts/`
+- Paper Performance Analytics: read-only paper/demo session metrics documented in `apps/forex-scanner/docs/paper_performance.md` and exported with `apps/forex-scanner/scripts/paper_performance_report.py`.
 
 Common commands:
 

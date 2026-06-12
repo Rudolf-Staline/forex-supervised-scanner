@@ -115,6 +115,42 @@ def test_pending_open_closed_cancelled_counts(tmp_path: Path) -> None:
     assert summary.total_paper_trades == 4
 
 
+def test_equity_drawdown_symbol_timeframe_strategy_and_stale_detection(tmp_path: Path) -> None:
+    reports = tmp_path / "reports"
+    _write_base_reports(
+        reports,
+        trades=[
+            {
+                "order_id": "trend-1",
+                "status": "closed",
+                "symbol": "EUR/USD",
+                "timeframe": "M15",
+                "strategy": "breakout",
+                "realized_r": 1.5,
+            },
+            {
+                "order_id": "trend-2",
+                "status": "open_trade",
+                "symbol": "EUR/USD",
+                "timeframe": "H1",
+                "strategy": "mean_reversion",
+            },
+        ],
+    )
+    dashboard = json.loads((reports / "operator_dashboard_summary.json").read_text(encoding="utf-8"))
+    dashboard["paper_equity_curve"] = [10000, 10100, 9950, 10025]
+    dashboard["generated_at"] = "2026-06-10T00:00:00+00:00"
+    (reports / "operator_dashboard_summary.json").write_text(json.dumps(dashboard), encoding="utf-8")
+
+    summary = _summary(reports)
+
+    assert summary.stale_input_files == ["operator_dashboard_summary.json"]
+    assert summary.max_drawdown == 150.0
+    assert summary.symbols_traded == ["EUR/USD"]
+    assert summary.timeframe_summary == {"M15": 1, "H1": 1}
+    assert summary.strategy_summary == {"breakout": 1, "mean_reversion": 1}
+
+
 def test_partial_stop_breakeven_trailing_events_and_time_in_trade(tmp_path: Path) -> None:
     reports = tmp_path / "reports"
     _write_base_reports(
