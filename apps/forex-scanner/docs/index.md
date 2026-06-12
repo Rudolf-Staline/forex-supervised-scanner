@@ -1,0 +1,103 @@
+# Forex Supervisor Documentation Index
+
+This index maps the `apps/forex-scanner` paper/demo documentation stack.
+
+The project remains **paper/demo only**:
+
+- no live trading is authorized;
+- keep `EXECUTION_MODE=paper`;
+- keep `ALLOW_LIVE_TRADING=false`;
+- keep `BROKER_MODE=paper`;
+- do not commit broker or MT5 secrets;
+- local MT5 checks are validation-only unless explicitly stated otherwise.
+
+## Start here
+
+| Need | Read |
+| --- | --- |
+| Understand the project safety scope | [`../README.md`](../README.md) |
+| Run the full local operator workflow | [`local_paper_operation_runbook.md`](local_paper_operation_runbook.md) |
+| Validate local MT5 market data safely | [`local_mt5_realtime_validation.md`](local_mt5_realtime_validation.md) |
+| Run one bounded realtime paper/demo entrypoint | [`realtime_command_center.md`](realtime_command_center.md) |
+| Summarize all report artifacts | [`operator_dashboard.md`](operator_dashboard.md) |
+| Export an auditable paper/demo bundle | [`paper_session_bundle.md`](paper_session_bundle.md) |
+| Analyze paper/demo performance | [`paper_performance.md`](paper_performance.md) |
+
+## Safety and setup
+
+| Document | Purpose |
+| --- | --- |
+| [`../README.md`](../README.md) | Main setup, cloud/local notes, safety defaults, and feature overview. |
+| [`local_mt5_realtime_validation.md`](local_mt5_realtime_validation.md) | Local Windows/MT5 read-only market-data validation path. |
+| [`local_paper_operation_runbook.md`](local_paper_operation_runbook.md) | Human operator procedure for safe paper/demo workflow execution and report interpretation. |
+
+## Autonomous paper/demo stack
+
+The autonomous stack is a bounded paper/demo pipeline. It does not authorize live trading.
+
+```text
+Evidence Builder -> Readiness Gate -> Recovery Planner -> Policy Engine -> Autonomous Supervisor -> Reports/Audit
+```
+
+| Document | Purpose |
+| --- | --- |
+| [`autonomous_supervisor.md`](autonomous_supervisor.md) | Bounded foreground supervisor for paper/demo operation. |
+| [`autonomous_readiness_gate.md`](autonomous_readiness_gate.md) | Pre-run readiness decision layer. |
+| [`autonomous_evidence_builder.md`](autonomous_evidence_builder.md) | Reproducible local evidence generation for readiness. |
+| [`autonomous_recovery_planner.md`](autonomous_recovery_planner.md) | Safe recovery recommendations when readiness/evidence blocks. |
+| [`autonomous_policy_engine.md`](autonomous_policy_engine.md) | Central policy gate for autonomy permissions and safety decisions. |
+| [`autonomous_scenario_runner.md`](autonomous_scenario_runner.md) | Cloud-safe end-to-end scenario simulations. |
+
+## Realtime paper/demo stack
+
+Realtime paper/demo operation validates market data and paper-only behavior without broker-live execution.
+
+| Document | Purpose |
+| --- | --- |
+| [`realtime_paper_operation.md`](realtime_paper_operation.md) | Realtime data health, realtime paper supervisor, heartbeat, synthetic fallback blocking, and position lifecycle overview. |
+| [`realtime_command_center.md`](realtime_command_center.md) | Unified bounded command-center entrypoint for realtime paper/demo checks. |
+| [`local_mt5_realtime_validation.md`](local_mt5_realtime_validation.md) | Local MT5 market-data readiness checks before realtime operation. |
+| [`local_paper_operation_runbook.md`](local_paper_operation_runbook.md) | End-to-end operator workflow combining MT5 validation, command center, supervisor, positions, and heartbeat review. |
+
+## Operator reporting and analytics
+
+| Document | Purpose |
+| --- | --- |
+| [`operator_dashboard.md`](operator_dashboard.md) | Offline read-only aggregation of paper/demo report artifacts into one operator status. |
+| [`paper_session_bundle.md`](paper_session_bundle.md) | ZIP bundle export with JSON/TXT manifests and SHA-256 checksums. |
+| [`paper_performance.md`](paper_performance.md) | Read-only analytics from paper/demo reports and local paper order artifacts. |
+
+## Audit and maintenance
+
+| Document | Purpose |
+| --- | --- |
+| [`missing_functionality_audit.md`](missing_functionality_audit.md) | Audit of delivered and missing paper/demo platform features. |
+| [`stale_issue_resolution_plan.md`](stale_issue_resolution_plan.md) | Manual closure plan for older open issues already implemented by merged PRs. |
+
+## Cloud-safe smoke commands
+
+Run from `apps/forex-scanner`.
+
+```bash
+python -m pytest -q tests/test_operator_dashboard.py tests/test_session_bundle.py tests/test_paper_performance.py --maxfail=1
+```
+
+```bash
+python scripts/operator_dashboard.py --reports-dir reports --export-json --export-txt
+python scripts/export_paper_session_bundle.py --reports-dir reports --output-dir reports/bundles --session-name paper-session-smoke
+python scripts/paper_performance_report.py --reports-dir reports --export-json --export-txt
+```
+
+## Local MT5 commands
+
+Local MT5 commands require a configured Windows MetaTrader 5 terminal. CI and cloud environments should use mocks, stubs, skips, or synthetic smoke paths.
+
+```bash
+python scripts/local_mt5_realtime_validation.py --symbols EUR/USD GBP/USD --timeframes M1 M5 --duration-minutes 15 --interval-seconds 30 --export-json --export-txt --export-csv
+```
+
+## Maintainer notes
+
+- Keep generated reports under `reports/` and do not commit them.
+- Do not add live-trading or broker-live execution paths through documentation tasks.
+- Do not close stale umbrella issues automatically; use [`stale_issue_resolution_plan.md`](stale_issue_resolution_plan.md) for manual review.
