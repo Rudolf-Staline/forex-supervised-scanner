@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import importlib.util
 import json
 import subprocess
@@ -253,3 +254,113 @@ def test_strict_cli_returns_non_zero_when_mt5_unavailable(tmp_path: Path):
 
     assert result.returncode == 2
     assert "BLOCKED_MT5_UNAVAILABLE" in result.stdout
+
+
+class PoorQualityMT5(FakeMT5):
+    """Returns fresh candles that contain a duplicate timestamp and a missing-bar gap."""
+
+    def copy_rates_from_pos(self, symbol, timeframe, start_pos, count):
+        step = 60 if timeframe == self.TIMEFRAME_M1 else 300
+        latest = int(__import__("time").time())
+        start = latest - (10 * step)
+        times = [start + (idx * step) for idx in range(10)]
+        times[5] = times[4]  # duplicate timestamp
+        times[8] = times[8] + (3 * step)  # gap producing missing bars
+        times[-1] = latest  # keep latest candle fresh
+        return [
+            {
+                "time": ts,
+                "open": 1.1000,
+                "high": 1.1010,
+                "low": 1.0990,
+                "close": 1.1005,
+            }
+            for ts in times
+        ]
+
+
+def test_duplicate_and_missing_bars_are_detected_and_block(tmp_path: Path):
+    module = load_module()
+    report = module.run_validation(make_config(module, tmp_path), mt5=PoorQualityMT5())
+
+    assert report.missing_bars["EUR/USD:M1"] > 0
+    assert report.duplicate_bars["EUR/USD:M1"] > 0
+    assert module.BLOCKED_POOR_DATA_QUALITY in report.blocking_reasons
+    assert report.final_status == module.BLOCKED_POOR_DATA_QUALITY
+
+
+def test_csv_sample_export_has_header_and_rows(tmp_path: Path):
+    module = load_module()
+    report = module.run_validation(
+        make_config(module, tmp_path, timeframes=["M1", "M5"]),
+        mt5=FakeMT5(),
+    )
+
+    csv_path = tmp_path / module.CSV_REPORT_NAME
+    assert csv_path.exists()
+
+    with csv_path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    expected_fields = {field.name for field in module.ValidationSample.__dataclass_fields__.values()}
+    assert rows, "CSV must contain at least one sample row"
+    assert set(rows[0].keys()) == expected_fields
+    assert len(rows) == report.sample_count == 2
+    assert {row["timeframe"] for row in rows} == {"M1", "M5"}
+    assert all(row["symbol"] == "EUR/USD" for row in rows)
+    assert all(row["resolved_symbol"] == "EURUSD" for row in rows)
+
+
+def test_validation_does_not_mutate_env(tmp_path: Path, monkeypatch):
+    module = load_module()
+    project_root = SCRIPT_PATH.parents[1]
+    env_path = project_root / ".env"
+    before = env_path.read_bytes() if env_path.exists() else None
+
+    # A .env inside the reports dir must never be created by a read-only run.
+    monkeypatch.chdir(tmp_path)
+    report = module.run_validation(make_config(module, tmp_path), mt5=FakeMT5())
+
+    assert report.safety_flags["env_mutation"] is False
+    assert not (tmp_path / ".env").exists()
+    after = env_path.read_bytes() if env_path.exists() else None
+    assert after == before  # project .env untouched (including still-absent)
+
+
+def test_script_source_has_no_order_send_or_live_trading_calls():
+    source = SCRIPT_PATH.read_text(encoding="utf-8")
+    # The runbook is read-only: it must never invoke broker execution primitives.
+    # The strings may appear only as safety-flag names, never as actual calls.
+    forbidden_calls = (
+        "order_send(",
+        ".order_send",
+        "OrderSend",
+        "order_check(",
+        ".order_check",
+        "positions_modify",
+        "trade_request",
+        "TRADE_ACTION",
+    )
+    for token in forbidden_calls:
+        assert token not in source, f"read-only runbook must not reference {token!r}"
+
+    # The only allowed occurrences of "order_send" are the safety-flag declaration
+    # and the documented safety assertion, never a callable invocation.
+    assert source.count("order_send") == source.count("order_send_called")
+
+
+def test_safety_flags_assert_no_live_capability(tmp_path: Path):
+    module = load_module()
+    mt5 = FakeMT5()
+    report = module.run_validation(make_config(module, tmp_path), mt5=mt5)
+
+    flags = report.safety_flags
+    assert flags["live_trading_authorized"] is False
+    assert flags["broker_live_execution_enabled"] is False
+    assert flags["order_send_called"] is False
+    assert flags["broker_order_submission"] is False
+    assert flags["daemon"] is False
+    assert flags["infinite_loop"] is False
+    assert flags["bounded_duration_only"] is True
+    assert flags["read_only_market_data_only"] is True
+    assert mt5.order_send_called is False
