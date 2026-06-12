@@ -53,7 +53,7 @@ class FakeMT5:
 
     def symbol_info_tick(self, symbol):
         spread = 0.0001 if not self.wide_spread else 0.02
-        return SimpleNamespace(time=1_900_000_000, bid=1.1000, ask=1.1000 + spread)
+        return SimpleNamespace(time=__import__("time").time() - 2, bid=1.1000, ask=1.1000 + spread)
 
     def copy_rates_from_pos(self, symbol, timeframe, start_pos, count):
         step = 60 if timeframe == self.TIMEFRAME_M1 else 300
@@ -112,9 +112,12 @@ def test_mocked_mt5_ready_exports_reports(tmp_path: Path):
     payload = json.loads((tmp_path / module.JSON_REPORT_NAME).read_text(encoding="utf-8"))
     assert payload["final_status"] == module.STATUS_READY
     assert payload["output_paths"]["json"].endswith(module.JSON_REPORT_NAME)
+    assert payload["resolved_symbols"]["EUR/USD"] == "EURUSD"
+    assert payload["samples"][0]["resolved_symbol"] == "EURUSD"
     assert payload["samples"][0]["spread_atr_ratio"] is not None
-    assert payload["samples"][0]["provider_latency_ms"] == payload["samples"][0]["latency_ms"]
-    assert payload["provider_latency_ms"]["EUR/USD:M1"] == payload["latency_ms"]["EUR/USD:M1"]
+    assert payload["samples"][0]["provider_latency_ms"] is not None
+    assert payload["provider_latency_ms"]["EUR/USD:M1"] == payload["samples"][0]["provider_latency_ms"]
+    assert payload["latency_ms"]["EUR/USD:M1"] == payload["samples"][0]["latency_ms"]
 
 
 def test_bounded_duration_repeats_polling_without_infinite_loop(tmp_path: Path, monkeypatch):
