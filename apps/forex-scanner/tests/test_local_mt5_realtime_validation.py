@@ -113,6 +113,36 @@ def test_mocked_mt5_ready_exports_reports(tmp_path: Path):
     assert payload["final_status"] == module.STATUS_READY
     assert payload["output_paths"]["json"].endswith(module.JSON_REPORT_NAME)
     assert payload["samples"][0]["spread_atr_ratio"] is not None
+    assert payload["samples"][0]["provider_latency_ms"] == payload["samples"][0]["latency_ms"]
+    assert payload["provider_latency_ms"]["EUR/USD:M1"] == payload["latency_ms"]["EUR/USD:M1"]
+
+
+def test_bounded_duration_repeats_polling_without_infinite_loop(tmp_path: Path, monkeypatch):
+    module = load_module()
+    mt5 = FakeMT5()
+    monotonic_values = iter([0.0, 0.0, 1.0, 30.0, 61.0])
+    sleeps: list[float] = []
+
+    monkeypatch.setattr(module.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(module.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    report = module.run_validation(
+        make_config(
+            module,
+            tmp_path,
+            duration_minutes=1,
+            interval_seconds=30,
+            export_json=False,
+            export_txt=False,
+            export_csv=False,
+        ),
+        mt5=mt5,
+    )
+
+    assert report.final_status == module.STATUS_READY
+    assert report.sample_count == 2
+    assert sleeps == [30]
+    assert len(mt5.selected) == 2
 
 
 def test_missing_mt5_is_ci_safe_and_exports_blocked_report(tmp_path: Path, monkeypatch):

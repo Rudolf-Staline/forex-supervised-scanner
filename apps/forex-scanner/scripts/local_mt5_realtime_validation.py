@@ -89,6 +89,7 @@ class ValidationSample:
     missing_bars: int
     duplicate_bars: int
     latency_ms: float | None
+    provider_latency_ms: float | None
     status: str
     blocking_reasons: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -116,6 +117,7 @@ class ValidationReport:
     missing_bars: dict[str, int]
     duplicate_bars: dict[str, int]
     latency_ms: dict[str, float | None]
+    provider_latency_ms: dict[str, float | None]
     sample_count: int
     final_status: str
     blocking_reasons: list[str]
@@ -282,6 +284,7 @@ def _empty_report(
         missing_bars={},
         duplicate_bars={},
         latency_ms={},
+        provider_latency_ms={},
         sample_count=0,
         final_status=blocking_reasons[0] if blocking_reasons else STATUS_WARN,
         blocking_reasons=list(dict.fromkeys(blocking_reasons)),
@@ -377,6 +380,7 @@ def _sample_symbol_timeframe(
         missing_bars=missing_bars,
         duplicate_bars=duplicate_bars,
         latency_ms=latency_ms,
+        provider_latency_ms=latency_ms,
         status=status,
         blocking_reasons=list(dict.fromkeys(blocking)),
         warnings=list(dict.fromkeys(warnings)),
@@ -452,6 +456,7 @@ def _build_report(
         missing_bars={key: sample.missing_bars for key, sample in latest_by_key.items()},
         duplicate_bars={key: sample.duplicate_bars for key, sample in latest_by_key.items()},
         latency_ms={key: sample.latency_ms for key, sample in latest_by_key.items()},
+        provider_latency_ms={key: sample.provider_latency_ms for key, sample in latest_by_key.items()},
         sample_count=len(samples),
         final_status=final_status,
         blocking_reasons=list(dict.fromkeys(blocking_reasons)),
