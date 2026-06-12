@@ -117,3 +117,13 @@ flags into the session manifest. The exporter is archive-only: it does not run
 trading logic, does not call MT5, does not call `order_send`, does not submit
 broker orders, and does not mutate `.env`. A passing dashboard or bundle is
 review evidence only and must never be treated as live-trading authorization.
+
+## Paper performance analytics companion
+
+After generating the operator dashboard and paper-session evidence, operators can run read-only Paper Performance Analytics:
+
+```bash
+python scripts/paper_performance_report.py --reports-dir reports --export-json --export-txt
+```
+
+The analytics report reads the dashboard, command-center, supervisor, heartbeat, position-manager, and local paper-order artifacts when present. It does not run strategies, does not call MT5, does not call `order_send`, does not submit broker orders, and does not authorize live trading. Unsafe safety flags propagated from dashboard/source reports block the paper-performance status. Metrics are diagnostic evidence only for paper/demo review.

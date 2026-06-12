@@ -304,3 +304,13 @@ daemon, and does not mutate `.env`.
 
 The bundle is evidence for human audit only. Even if all included reports pass,
 that does **not** authorize live trading or broker-live execution.
+
+## Post-session paper performance review
+
+For a completed paper/demo session, generate performance analytics from existing reports only:
+
+```bash
+python scripts/paper_performance_report.py --reports-dir reports --export-json --export-txt
+```
+
+Review `reports/paper_performance_summary.json` and `reports/paper_performance_report.txt` for trade counts, win/loss/breakeven counts, realized R, realized PnL when available, partial exits, stop movement events, data completeness, warnings, blocking reasons, and propagated safety flags. This step is read-only: it does not run strategies, does not call MT5, does not call `order_send`, does not submit broker orders, and does not authorize live trading. Treat all metrics as diagnostic evidence only.

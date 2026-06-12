@@ -1,4 +1,4 @@
-"""Generate paper trading performance report. Informational-only, no orders sent."""
+"""Export read-only paper/demo performance analytics from local reports."""
 
 from __future__ import annotations
 
@@ -11,32 +11,34 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.reporting.paper_performance import WARNING_MESSAGE, build_paper_performance_report, export_summary, load_records
+from app.reporting.paper_performance import PaperPerformanceConfig, PaperPerformanceService, render_text_report
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Paper performance analyzer (informational-only).")
-    parser.add_argument("--reports-dir", default="reports")
-    parser.add_argument("--asset-class", choices=["forex", "commodities", "indices", "all"], default="all")
-    parser.add_argument("--symbol")
-    parser.add_argument("--session")
-    parser.add_argument("--export-json", action="store_true")
-    parser.add_argument("--export-csv", action="store_true")
-    parser.add_argument("--top-n", type=int, default=10)
+    parser = argparse.ArgumentParser(
+        description="Read-only paper/demo performance analytics from existing local report artifacts."
+    )
+    parser.add_argument("--reports-dir", default="reports", help="Directory containing existing local paper/demo reports.")
+    parser.add_argument("--export-json", action="store_true", help="Write reports/paper_performance_summary.json.")
+    parser.add_argument("--export-txt", action="store_true", help="Write reports/paper_performance_report.txt.")
+    parser.add_argument("--strict", action="store_true", help="Treat missing/stale/incomplete inputs as incomplete-data status.")
+    parser.add_argument("--export-csv", action="store_true", help=argparse.SUPPRESS)  # legacy no-op compatibility
     args = parser.parse_args()
 
-    reports_dir = PROJECT_ROOT / args.reports_dir
-    records = load_records(reports_dir)
-    report = build_paper_performance_report(
-        records, asset_class=args.asset_class, symbol=args.symbol, session=args.session, top_n=args.top_n
-    )
+    reports_dir = Path(args.reports_dir)
+    if not reports_dir.is_absolute():
+        reports_dir = PROJECT_ROOT / reports_dir
+    summary = PaperPerformanceService(
+        PaperPerformanceConfig(
+            reports_dir=reports_dir,
+            export_json=args.export_json,
+            export_txt=args.export_txt,
+            strict=args.strict,
+        )
+    ).build_summary()
 
-    print("paper_performance_report=informational_only")
-    print(WARNING_MESSAGE)
-    print(json.dumps(report, indent=2, sort_keys=True))
-
-    if args.export_json or args.export_csv:
-        export_summary(report, reports_dir, export_csv=args.export_csv)
+    print(render_text_report(summary), end="")
+    print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":
