@@ -273,3 +273,13 @@ python scripts/operator_dashboard.py --reports-dir reports --strict
 It aggregates MT5 realtime validation, command center, realtime paper supervisor, position manager, runtime safety heartbeat, scenarios, and (when present) readiness/evidence/policy/recovery reports into one `final_operator_status`, with stale/missing report detection and recommended next actions. Exports go to `reports/operator_dashboard_summary.json` and `reports/operator_dashboard_report.txt`.
 
 The dashboard is strictly read-only and works offline: no trading logic, no MT5, no `order_send`, no broker orders, no `.env` mutation, no daemon, and no MT5 requirement in CI. See [`docs/operator_dashboard.md`](docs/operator_dashboard.md).
+
+## Paper Session Bundle Export
+
+Package the relevant paper/demo reports into one auditable zip with a checksummed manifest:
+
+```bash
+python scripts/export_paper_session_bundle.py --reports-dir reports --output-dir reports/bundles --session-name paper-session-smoke
+```
+
+Outputs `reports/bundles/<session-name>.zip`, `<session-name>_manifest.json`, and `<session-name>_manifest.txt`, with per-file sha256 checksums, missing-file detection, and the dashboard's `final_operator_status` when `operator_dashboard_summary.json` is present. The bundler is read-only and paper/demo only: no trading, no MT5, no `order_send`, no `.env` mutation. See [`docs/paper_session_bundle.md`](docs/paper_session_bundle.md).
