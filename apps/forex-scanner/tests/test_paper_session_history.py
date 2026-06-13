@@ -221,6 +221,35 @@ def test_aggregate_trade_and_outcome_metrics(tmp_path: Path) -> None:
     assert summary["distinct_symbols_traded"] == ["EUR/USD", "XAU/USD"]
 
 
+def test_boolean_trade_counts_are_not_aggregated_as_integers(tmp_path: Path) -> None:
+    write_review_artifacts(tmp_path)
+    write_json(
+        tmp_path / "paper_performance_summary.json",
+        {
+            "total_paper_trades": True,
+            "closed_count": True,
+            "win_count": False,
+            "loss_count": True,
+            "breakeven_count": False,
+            "win_rate": 0.5,
+            "realized_r_total": 1.0,
+            "realized_pnl_total": 10.0,
+            "symbols_traded": ["EUR/USD"],
+        },
+    )
+
+    summary = run_service(tmp_path, append_latest=True)
+    entries, _ = load_history_entries(tmp_path)
+
+    assert entries[0]["closed_count"] is None
+    assert entries[0]["win_count"] is None
+    assert entries[0]["loss_count"] is None
+    assert entries[0]["breakeven_count"] is None
+    assert summary["aggregate_closed_trades"] == 0
+    assert summary["aggregate_wins"] == 0
+    assert summary["aggregate_losses"] == 0
+    assert summary["aggregate_breakevens"] == 0
+
 def test_metrics_null_when_performance_missing(tmp_path: Path) -> None:
     write_review_artifacts(tmp_path, with_performance=False)
     (tmp_path / "paper_performance_summary.json").unlink(missing_ok=True)
@@ -329,6 +358,25 @@ def test_all_writes_stay_under_reports_dir(tmp_path: Path) -> None:
     written = {path.name for path in reports_dir.iterdir() if path.is_file()}
     assert {DEFAULT_HISTORY_JSONL, DEFAULT_HISTORY_JSON, DEFAULT_HISTORY_TXT} <= written
 
+
+def test_existing_history_output_symlink_escape_is_rejected(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    write_review_artifacts(reports_dir)
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text("", encoding="utf-8")
+    history_path = reports_dir / DEFAULT_HISTORY_JSONL
+    try:
+        history_path.symlink_to(outside)
+    except OSError as error:
+        pytest.skip(f"symlinks unavailable: {error}")
+
+    with pytest.raises(ValueError, match="escapes reports directory"):
+        run_service(reports_dir, append_latest=True)
+    assert outside.read_text(encoding="utf-8") == ""
+
+    cli = load_cli_module()
+    assert cli.main(["--reports-dir", str(reports_dir), "--append-latest"]) == 2
 
 def test_source_reports_are_not_modified(tmp_path: Path) -> None:
     write_review_artifacts(tmp_path)

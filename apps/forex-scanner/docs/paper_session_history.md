@@ -13,7 +13,8 @@ days. It is **local paper/demo history only**:
 - it does **not** mutate `.env` or the process environment;
 - it does **not** authorize live trading — history entries are diagnostic
   paper/demo evidence only;
-- it writes only under `reports/` and never modifies source reports;
+- it writes only under `reports/`, rejects history output paths that resolve
+  outside the reports directory, and never modifies source reports;
 - it is bounded and one-shot: no daemon, no infinite loop.
 
 ## CLI
@@ -77,6 +78,11 @@ The ledger file is never rewritten by append operations.
 - `reports/paper_session_history_summary.json` — aggregate summary
 - `reports/paper_session_history_report.txt` — human-readable report
 
+Before reading or writing any generated history artifact, the ledger resolves
+the destination and rejects pre-existing symlinks that would escape the reports
+directory. This keeps generated history files under `reports/` and avoids
+mutating external paths.
+
 Each ledger entry records: `recorded_at`, `session_name`,
 `review_generated_at`, `final_review_status`, `operator_status`,
 `performance_status`, `bundle_status`, `total_paper_trades`, `closed_count`,
@@ -117,8 +123,9 @@ accounting statement.
 `--strict` exits `1` whenever the final status is not
 `PAPER_SESSION_HISTORY_READY` or `PAPER_SESSION_HISTORY_WARN` — i.e. on
 EMPTY, INCOMPLETE (including a missing review with `--append-latest`), or
-BLOCKED. Without `--strict` the CLI always exits `0` (or `2` for an invalid
-`--session-name`), so the report can be inspected.
+BLOCKED. Without `--strict` the CLI exits `0` for safe report statuses and
+`2` for invalid input such as an invalid `--session-name` or an unsafe history
+output path, so the report can be inspected when the configured paths are safe.
 
 ## Testing
 

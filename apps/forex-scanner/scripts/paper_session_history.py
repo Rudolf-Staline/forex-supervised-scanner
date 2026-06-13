@@ -59,7 +59,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {error}")
         return 2
 
-    summary = PaperSessionHistoryService(config).run()
+    try:
+        summary = PaperSessionHistoryService(config).run()
+    except ValueError as error:
+        print(f"error: {error}")
+        return 2
     print(render_history_txt(summary))
 
     if args.strict and summary["final_history_status"] not in {STATUS_READY, STATUS_WARN}:
