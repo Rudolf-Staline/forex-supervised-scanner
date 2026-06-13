@@ -62,3 +62,4 @@ jobs:
           python -m pytest tests/test_session_bundle.py
           python -m pytest tests/test_paper_performance.py
           python -m pytest tests/test_paper_session_review.py
+          python -m pytest tests/test_paper_session_history.py
