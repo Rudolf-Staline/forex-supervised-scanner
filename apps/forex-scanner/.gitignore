@@ -11,3 +11,4 @@ reports/*.json
 reports/*.log
 secrets
 credentials
+reports/*.txt
