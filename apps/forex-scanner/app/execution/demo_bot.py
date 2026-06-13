@@ -50,6 +50,7 @@ class DemoBotCycleResult(BaseModel):
     opportunities: int
     orders_created: int
     decisions: list[DemoBotDecision]
+    scanned_opportunities: list[Opportunity] = Field(default_factory=list)
     logs: list[str]
     risk_summary: DailyRiskSummary
 
@@ -183,6 +184,7 @@ class DemoBotService:
             opportunities=len(report.opportunities),
             orders_created=len(created_orders),
             decisions=decisions,
+            scanned_opportunities=report.opportunities,
             logs=logs,
             risk_summary=risk_summary,
         )

@@ -54,3 +54,4 @@ apps/forex-scanner/config/settings.json
 # OS files
 .DS_Store
 Thumbs.db
+reports/*.txt
