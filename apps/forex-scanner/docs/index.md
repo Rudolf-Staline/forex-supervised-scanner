@@ -24,6 +24,7 @@ The project remains **paper/demo only**:
 | Analyze paper/demo performance | [`paper_performance.md`](paper_performance.md) |
 | Run a post-session operator review | [`paper_session_review.md`](paper_session_review.md) |
 | Track session review history over time | [`paper_session_history.md`](paper_session_history.md) |
+| Analyze multi-session paper/demo history trends | [`paper_session_trends.md`](paper_session_trends.md) |
 
 ## Safety and setup
 
@@ -70,6 +71,7 @@ Realtime paper/demo operation validates market data and paper-only behavior with
 | [`paper_performance.md`](paper_performance.md) | Read-only analytics from paper/demo reports and local paper order artifacts. |
 | [`paper_session_review.md`](paper_session_review.md) | One post-session review command that composes dashboard, performance, and optional bundle export. |
 | [`paper_session_history.md`](paper_session_history.md) | Append-only JSONL ledger of session review snapshots with aggregate JSON/TXT history reports. |
+| [`paper_session_trends.md`](paper_session_trends.md) | Offline multi-session trend insights from the paper session history ledger. |
 
 ## Audit and maintenance
 
@@ -83,7 +85,7 @@ Realtime paper/demo operation validates market data and paper-only behavior with
 Run from `apps/forex-scanner`.
 
 ```bash
-python -m pytest -q tests/test_operator_dashboard.py tests/test_session_bundle.py tests/test_paper_performance.py tests/test_paper_session_review.py tests/test_paper_session_history.py --maxfail=1
+python -m pytest -q tests/test_operator_dashboard.py tests/test_session_bundle.py tests/test_paper_performance.py tests/test_paper_session_review.py tests/test_paper_session_history.py tests/test_paper_session_trends.py --maxfail=1
 ```
 
 ```bash
@@ -92,6 +94,7 @@ python scripts/export_paper_session_bundle.py --reports-dir reports --output-dir
 python scripts/paper_performance_report.py --reports-dir reports --export-json --export-txt
 python scripts/paper_session_review.py --reports-dir reports --export-json --export-txt --export-bundle --session-name paper-session-review
 python scripts/paper_session_history.py --reports-dir reports --append-latest --session-name paper-session-review --export-json --export-txt
+python scripts/paper_session_trends.py --reports-dir reports --window 10 --export-json --export-txt
 ```
 
 ## Local MT5 commands
