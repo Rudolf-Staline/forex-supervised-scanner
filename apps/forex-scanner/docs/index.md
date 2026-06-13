@@ -81,6 +81,14 @@ Realtime paper/demo operation validates market data and paper-only behavior with
 | [`scoring_formula.md`](scoring_formula.md) | How the 0–100 final score is assembled from layer and component weights. |
 | [`min_score_policy.md`](min_score_policy.md) | Static vs adaptive min score, scanner vs demo-bot thresholds, and mismatch warnings. |
 
+## Operator diagnostics
+
+| Document | Purpose |
+| --- | --- |
+| [`operator_decision_doctor.md`](operator_decision_doctor.md) | One read-only command to diagnose bot state and the primary blocker. |
+| [`next_safe_bot_command.md`](next_safe_bot_command.md) | Recommends exactly one safe bounded next command; explain-last-block/decision companions. |
+| [`realtime_mt5_decision_blocks.md`](realtime_mt5_decision_blocks.md) | Stale data, spread/ATR, readiness blocks, and why synthetic data is not live-quality. |
+
 ## Audit and maintenance
 
 | Document | Purpose |
@@ -105,6 +113,10 @@ python scripts/paper_session_history.py --reports-dir reports --append-latest --
 python scripts/paper_session_trends.py --reports-dir reports --window 10 --export-json --export-txt
 python scripts/score_decomposition.py --provider synthetic --symbols EUR/USD --style day_trading --export-json --export-txt
 python scripts/min_score_policy_report.py --symbols EUR/USD --style day_trading --export-json --export-txt
+python scripts/decision_doctor.py --reports-dir reports --export-json --export-txt
+python scripts/next_safe_bot_command.py --reports-dir reports
+python scripts/explain_last_block.py --reports-dir reports --export-json --export-txt
+python scripts/explain_last_decision.py --reports-dir reports --export-json --export-txt
 ```
 
 ## Local MT5 commands
