@@ -326,6 +326,16 @@ python scripts/paper_session_history.py --reports-dir reports --append-latest --
 
 It reads existing review/performance/dashboard artifacts, skips duplicate snapshots deterministically, and writes `reports/paper_session_history.jsonl`, `reports/paper_session_history_summary.json`, and `reports/paper_session_history_report.txt`. It is local paper/demo history only: no trading logic, no MT5 import, no `order_send`, no `.env` mutation, no daemon, and no live-trading authorization. See [`docs/paper_session_history.md`](docs/paper_session_history.md).
 
+## Paper Session Trends
+
+Paper Session Trends analyzes the existing paper/demo history ledger for multi-session insights without running strategies, Paper Session Review, Paper Session History, MT5, or broker order submission:
+
+```bash
+python scripts/paper_session_trends.py --reports-dir reports --window 10 --export-json --export-txt
+```
+
+It reads `reports/paper_session_history.jsonl` and writes `reports/paper_session_trends_summary.json` and `reports/paper_session_trends_report.txt` when exports are enabled. It computes status trends, recurring/new/resolved warnings and blocking reasons, win-rate/realized-R trends, aggregate paper metrics, symbol concentration, safety flag detections, and recommended next actions. Missing or empty history returns a safe `PAPER_SESSION_TRENDS_EMPTY` status in non-strict mode. See [`docs/paper_session_trends.md`](docs/paper_session_trends.md).
+
 ## Stale Issue Resolution Plan
 
 Several older GitHub issues remain open even though their requested paper/demo features appear to have landed through later merged PRs. The stale issue resolution plan documents the implementation evidence and gives manual closure recommendations.
