@@ -23,7 +23,7 @@ from app.execution.demo_bot import DemoBotService
 from app.execution.mt5_demo_broker import MT5DemoBroker
 from app.notifications.notifier import notify_cycle_result
 from app.reporting.signal_journal import append_cycle_signal_journal
-from app.reporting.decision_trace import build_decision_trace, export_decision_traces, export_min_score_policy_report
+from app.reporting.decision_trace import export_decision_traces, export_min_score_policy_report
 
 
 def main() -> None:
@@ -61,14 +61,7 @@ def main() -> None:
         rejected_records=rejected_records,
         created_orders=created_orders,
     )
-    traces = [
-        build_decision_trace(
-            opportunity,
-            settings,
-            bot_decision=next((decision for decision in result.decisions if decision.symbol == opportunity.symbol and decision.setup_subtype == opportunity.setup_subtype.value), None),
-        )
-        for opportunity in result.scanned_opportunities
-    ]
+    traces = result.decision_traces
     export_decision_traces(traces, PROJECT_ROOT / "reports")
     export_min_score_policy_report(traces, PROJECT_ROOT / "reports")
     print_cycle_result(result)

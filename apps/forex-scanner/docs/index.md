@@ -73,6 +73,14 @@ Realtime paper/demo operation validates market data and paper-only behavior with
 | [`paper_session_history.md`](paper_session_history.md) | Append-only JSONL ledger of session review snapshots with aggregate JSON/TXT history reports. |
 | [`paper_session_trends.md`](paper_session_trends.md) | Offline multi-session trend insights from the paper session history ledger. |
 
+## Decision explainability
+
+| Document | Purpose |
+| --- | --- |
+| [`decision_traces.md`](decision_traces.md) | Structured, sanitized per-decision traces with gate results and next diagnostic action. |
+| [`scoring_formula.md`](scoring_formula.md) | How the 0–100 final score is assembled from layer and component weights. |
+| [`min_score_policy.md`](min_score_policy.md) | Static vs adaptive min score, scanner vs demo-bot thresholds, and mismatch warnings. |
+
 ## Audit and maintenance
 
 | Document | Purpose |
@@ -95,6 +103,8 @@ python scripts/paper_performance_report.py --reports-dir reports --export-json -
 python scripts/paper_session_review.py --reports-dir reports --export-json --export-txt --export-bundle --session-name paper-session-review
 python scripts/paper_session_history.py --reports-dir reports --append-latest --session-name paper-session-review --export-json --export-txt
 python scripts/paper_session_trends.py --reports-dir reports --window 10 --export-json --export-txt
+python scripts/score_decomposition.py --provider synthetic --symbols EUR/USD --style day_trading --export-json --export-txt
+python scripts/min_score_policy_report.py --symbols EUR/USD --style day_trading --export-json --export-txt
 ```
 
 ## Local MT5 commands

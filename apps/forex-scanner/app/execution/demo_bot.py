@@ -20,6 +20,7 @@ from app.execution.rejected_signals import RejectedSignalRecord
 from app.journal.trade_journal import append_trade_journal, decision_to_journal_record
 from app.market.sessions import get_market_session
 from app.paper.trading import submit_signal_to_paper
+from app.reporting.decision_trace import DecisionTrace, build_decision_trace
 from app.risk.daily_limits import DailyRiskConfig, DailyRiskSummary, evaluate_daily_limits, summarize_daily_risk
 from app.storage.database import Database
 
@@ -51,6 +52,7 @@ class DemoBotCycleResult(BaseModel):
     orders_created: int
     decisions: list[DemoBotDecision]
     scanned_opportunities: list[Opportunity] = Field(default_factory=list)
+    decision_traces: list[DecisionTrace] = Field(default_factory=list)
     logs: list[str]
     risk_summary: DailyRiskSummary
 
@@ -79,9 +81,12 @@ class DemoBotService:
         existing_orders = self.database.load_paper_orders()
         controls = self.database.load_operator_controls()
         decisions: list[DemoBotDecision] = []
+        decision_traces: list[DecisionTrace] = []
         created_orders: list[ExecutionOrder] = []
         rejected_records: list[RejectedSignalRecord] = []
         journal_records = []
+        broker_mode = os.getenv("BROKER_MODE", "paper").strip().lower() or "paper"
+        provider_name = getattr(self.provider, "name", None)
         if controls.maintenance_mode:
             logs.append("Operator maintenance mode is active; every opportunity will be blocked.")
         if controls.degraded_mode:
@@ -121,6 +126,19 @@ class DemoBotService:
                     f"detected_patterns={','.join(decision.detected_patterns) or '-'} pattern_score={decision.pattern_score:.2f}."
                 )
             decisions.append(decision)
+            # Build one sanitized, paper-only decision trace per opportunity. This is
+            # diagnostic only: it never creates an order and never alters the decision.
+            decision_traces.append(
+                build_decision_trace(
+                    opportunity,
+                    self.settings,
+                    bot_decision=decision,
+                    paper_order_ids=decision.order_ids,
+                    cycle_id=cycle_id,
+                    provider=provider_name,
+                    broker_mode=broker_mode,
+                )
+            )
             journal_records.append(
                 decision_to_journal_record(
                     cycle_id=cycle_id,
@@ -185,6 +203,7 @@ class DemoBotService:
             orders_created=len(created_orders),
             decisions=decisions,
             scanned_opportunities=report.opportunities,
+            decision_traces=decision_traces,
             logs=logs,
             risk_summary=risk_summary,
         )
