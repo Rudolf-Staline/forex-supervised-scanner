@@ -190,7 +190,7 @@ def append_history_entry(reports_dir: Path, entry: dict[str, Any]) -> tuple[bool
     record is skipped; the first recorded snapshot is kept unchanged.
     """
     reports_dir = Path(reports_dir)
-    path = reports_dir / DEFAULT_HISTORY_JSONL
+    path = _history_output_path(reports_dir, DEFAULT_HISTORY_JSONL)
     existing, _ = load_history_entries(reports_dir)
     key = (entry.get("session_name"), entry.get("review_generated_at"))
     for record in existing:
@@ -203,7 +203,7 @@ def append_history_entry(reports_dir: Path, entry: dict[str, Any]) -> tuple[bool
 
 
 def load_history_entries(reports_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
-    path = Path(reports_dir) / DEFAULT_HISTORY_JSONL
+    path = _history_output_path(Path(reports_dir), DEFAULT_HISTORY_JSONL)
     if not path.is_file():
         return [], []
     warnings: list[str] = []
@@ -309,14 +309,14 @@ def build_history_summary(
 
 
 def export_history_json(summary: dict[str, Any], reports_dir: Path) -> Path:
-    path = Path(reports_dir) / DEFAULT_HISTORY_JSON
+    path = _history_output_path(Path(reports_dir), DEFAULT_HISTORY_JSON)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
 
 
 def export_history_txt(summary: dict[str, Any], reports_dir: Path) -> Path:
-    path = Path(reports_dir) / DEFAULT_HISTORY_TXT
+    path = _history_output_path(Path(reports_dir), DEFAULT_HISTORY_TXT)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_history_txt(summary), encoding="utf-8")
     return path
@@ -435,6 +435,26 @@ def _recurring(counter: Counter[str]) -> list[dict[str, Any]]:
     return [{"message": message, "count": count} for message, count in counter.most_common(_RECURRING_TOP_N) if count >= 2]
 
 
+def _history_output_path(reports_dir: Path, filename: str) -> Path:
+    """Return a history artifact path that cannot escape reports_dir.
+
+    History filenames are constants, but this guard also rejects pre-existing
+    symlinks that point outside the reports directory before any write occurs.
+    """
+    if Path(filename).name != filename:
+        raise ValueError(f"history output filename must not contain path separators: {filename}")
+    reports_root = reports_dir.resolve(strict=False)
+    path = reports_dir / filename
+    parent = path.parent.resolve(strict=False)
+    if parent != reports_root:
+        raise ValueError(f"history output parent escapes reports directory: {path}")
+    if (path.exists() or path.is_symlink()) and not path.resolve(strict=False).is_relative_to(
+        reports_root
+    ):
+        raise ValueError(f"history output path escapes reports directory: {path}")
+    return path
+
+
 def _read_json_dict(path: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
@@ -450,6 +470,8 @@ def _optional_str(value: object) -> str | None:
 
 
 def _to_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
     try:
         return int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
