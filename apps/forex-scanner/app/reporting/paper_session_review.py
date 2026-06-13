@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -141,6 +142,7 @@ class PaperSessionReviewService:
 
         bundle_status = "NOT_REQUESTED"
         bundle_manifest: dict[str, Any] | None = None
+        bundle_error = ""
         if self.config.export_bundle:
             try:
                 bundle_manifest = build_paper_session_bundle(
@@ -153,10 +155,10 @@ class PaperSessionReviewService:
                 )
                 bundle_status = "EXPORTED"
                 output_paths.update({f"bundle_{key}": value for key, value in bundle_manifest.get("output_paths", {}).items()})
-            except PaperSessionBundleError as error:
+            except (PaperSessionBundleError, ValueError) as error:
                 bundle_status = "BLOCKED"
                 bundle_manifest = None
-                output_paths["bundle_error"] = str(error)
+                bundle_error = str(error)
 
         warnings = _dedupe(
             [
@@ -173,14 +175,15 @@ class PaperSessionReviewService:
             ]
         )
         if bundle_status == "BLOCKED":
-            blocking.append("paper session bundle export failed")
+            blocking.append(f"paper session bundle export failed: {bundle_error}")
 
         safety_flags = _merge_safety_flags(
             dashboard.get("safety_flags"),
             performance.safety_flags,
             None if bundle_manifest is None else bundle_manifest.get("safety_flags"),
         )
-        unsafe = [key for key, value in safety_flags.items() if key in UNSAFE_FLAG_KEYS and value is True]
+        unsafe = {key for key, value in safety_flags.items() if key in UNSAFE_FLAG_KEYS and value is True}
+        unsafe |= _unsafe_flags_from_reasons(blocking)
         if unsafe:
             blocking.append("unsafe safety flags detected: " + ", ".join(sorted(unsafe)))
 
@@ -354,6 +357,14 @@ def _review_recommendations(final_status: str, bundle_status: str) -> list[str]:
     if bundle_status == "NOT_REQUESTED":
         return ["rerun with --export-bundle to create an auditable session archive"]
     return ["review warnings before archiving the paper/demo session"]
+
+
+_UNSAFE_FLAG_REASON_RE = re.compile(r"unsafe safety flag (\w+)=true")
+
+
+def _unsafe_flags_from_reasons(reasons: list[str]) -> set[str]:
+    """Extract unsafe flag names surfaced by source-level checks (e.g. the operator dashboard)."""
+    return {match.group(1) for reason in reasons for match in _UNSAFE_FLAG_REASON_RE.finditer(reason)}
 
 
 def _optional_str(value: object) -> str | None:

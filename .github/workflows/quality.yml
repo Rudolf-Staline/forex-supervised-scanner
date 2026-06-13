@@ -57,6 +57,8 @@ jobs:
               "tests/test_demo_execution_gate.py",
               "tests/test_operator_dashboard.py",
               "tests/test_session_bundle.py",
+              "tests/test_paper_performance.py",
+              "tests/test_paper_session_review.py",
           ]
           existing = [t for t in tests if Path(t).exists()]
           print("Running tests:", existing)

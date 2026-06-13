@@ -85,6 +85,20 @@ A review is blocked if unsafe source flags are detected, for example live execut
 
 A review is incomplete if required reports are missing or stale.
 
+## Exit codes
+
+- `0` — review completed and was written/printed. This includes incomplete
+  reviews: without `--strict`, missing or stale local reports yield
+  `PAPER_SESSION_REVIEW_INCOMPLETE` with exit code `0` so the review can be
+  inspected.
+- `1` — `--strict` and the final review status is not
+  `PAPER_SESSION_REVIEW_READY` or `PAPER_SESSION_REVIEW_WARN`.
+
+Bundle failures never crash the review: an invalid `--session-name`, an unsafe
+bundle path, or a strict bundle block sets `bundle_status=BLOCKED`, records a
+detailed `paper session bundle export failed: ...` blocking reason, and the
+final review status becomes `PAPER_SESSION_REVIEW_BLOCKED`.
+
 ## Typical workflow
 
 1. Run the local MT5 realtime validation, if working from a local Windows MT5 machine.

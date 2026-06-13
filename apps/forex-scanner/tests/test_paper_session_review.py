@@ -6,7 +6,7 @@ import importlib.util
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -140,12 +140,106 @@ def test_unsafe_source_flags_block_review(tmp_path: Path) -> None:
     assert any("unsafe safety flags" in reason for reason in summary["blocking_reasons"])
 
 
+def test_review_marks_stale_reports_as_incomplete(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    write_minimal_ready_reports(reports_dir)
+
+    summary = build_paper_session_review(reports_dir, now=NOW + timedelta(hours=48), max_age_hours=24.0)
+
+    assert summary["final_review_status"] == STATUS_INCOMPLETE
+    assert summary["stale_reports"]
+    assert any("stale" in warning for warning in summary["warnings"])
+
+
+def test_strict_bundle_block_propagates_to_review(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True)
+
+    summary = build_paper_session_review(
+        reports_dir,
+        export_bundle=True,
+        bundle_output_dir=reports_dir / "bundles",
+        session_name="strict-block",
+        strict=True,
+        now=NOW,
+    )
+
+    assert summary["bundle_status"] == "BLOCKED"
+    assert summary["final_review_status"] == STATUS_BLOCKED
+    assert any("bundle export failed" in reason for reason in summary["blocking_reasons"])
+    assert "bundle_error" not in summary["output_paths"]
+
+
+def test_invalid_session_name_blocks_bundle_without_crash(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    write_minimal_ready_reports(reports_dir)
+
+    summary = build_paper_session_review(
+        reports_dir,
+        export_bundle=True,
+        bundle_output_dir=reports_dir / "bundles",
+        session_name="../escape",
+        now=NOW,
+    )
+
+    assert summary["bundle_status"] == "BLOCKED"
+    assert summary["final_review_status"] == STATUS_BLOCKED
+    assert any("session name" in reason for reason in summary["blocking_reasons"])
+    assert not (tmp_path / "escape.zip").exists()
+
+
+def test_exported_json_contains_stable_output_paths(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    write_minimal_ready_reports(reports_dir)
+
+    build_paper_session_review(reports_dir, export_json=True, export_txt=True, now=NOW)
+
+    payload = json.loads((reports_dir / DEFAULT_REVIEW_JSON).read_text(encoding="utf-8"))
+    assert payload["output_paths"]["json"] == str(reports_dir / DEFAULT_REVIEW_JSON)
+    assert payload["output_paths"]["txt"] == str(reports_dir / DEFAULT_REVIEW_TXT)
+    assert payload["output_paths"]["operator_dashboard_json"] == str(reports_dir / "operator_dashboard_summary.json")
+
+
 def test_strict_cli_returns_non_zero_for_incomplete_review(tmp_path: Path) -> None:
     cli = load_cli_module()
 
     result = cli.main(["--reports-dir", str(tmp_path / "reports"), "--strict"])
 
     assert result == 1
+
+
+def test_cli_smoke_with_all_exports_exits_zero(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    reports_dir = tmp_path / "reports"
+    write_minimal_ready_reports(reports_dir)
+    cli = load_cli_module()
+
+    result = cli.main(
+        [
+            "--reports-dir",
+            str(reports_dir),
+            "--export-json",
+            "--export-txt",
+            "--export-bundle",
+            "--bundle-output-dir",
+            str(reports_dir / "bundles"),
+            "--session-name",
+            "paper-session-review",
+        ]
+    )
+
+    assert result == 0
+    assert (reports_dir / DEFAULT_REVIEW_JSON).is_file()
+    assert (reports_dir / DEFAULT_REVIEW_TXT).is_file()
+    assert (reports_dir / "bundles" / "paper-session-review.zip").is_file()
+    output = capsys.readouterr().out
+    assert "SAFETY" in output
+    assert "final_review_status=" in output
+
+
+def test_cli_missing_reports_exits_zero_without_strict(tmp_path: Path) -> None:
+    cli = load_cli_module()
+
+    assert cli.main(["--reports-dir", str(tmp_path / "reports"), "--export-json", "--export-txt"]) == 0
 
 
 def test_no_order_send_no_terminal_import_no_env_mutation_in_sources() -> None:
