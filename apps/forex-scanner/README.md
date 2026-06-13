@@ -316,6 +316,16 @@ python scripts/paper_session_review.py --reports-dir reports --export-json --exp
 
 It writes `reports/paper_session_review_summary.json` and `reports/paper_session_review_report.txt`, refreshes the dashboard/performance artifacts when exports are enabled, and can create an auditable bundle under `reports/bundles/`. It remains read-only and paper/demo only: no trading logic, no MT5 import, no `order_send`, no broker orders, no `.env` mutation, no daemon, and no live-trading authorization. See [`docs/paper_session_review.md`](docs/paper_session_review.md).
 
+## Paper Session History
+
+The Paper Session History Ledger appends compact snapshots of completed paper/demo session reviews to a local JSONL ledger and aggregates them into JSON/TXT history reports:
+
+```bash
+python scripts/paper_session_history.py --reports-dir reports --append-latest --session-name paper-session-review --export-json --export-txt
+```
+
+It reads existing review/performance/dashboard artifacts, skips duplicate snapshots deterministically, and writes `reports/paper_session_history.jsonl`, `reports/paper_session_history_summary.json`, and `reports/paper_session_history_report.txt`. It is local paper/demo history only: no trading logic, no MT5 import, no `order_send`, no `.env` mutation, no daemon, and no live-trading authorization. See [`docs/paper_session_history.md`](docs/paper_session_history.md).
+
 ## Stale Issue Resolution Plan
 
 Several older GitHub issues remain open even though their requested paper/demo features appear to have landed through later merged PRs. The stale issue resolution plan documents the implementation evidence and gives manual closure recommendations.
