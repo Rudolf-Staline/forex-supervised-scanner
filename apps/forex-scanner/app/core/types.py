@@ -421,7 +421,15 @@ class TradeRecord(BaseModel):
 
 
 class BacktestMetrics(BaseModel):
-    """Summary metrics for a backtest run."""
+    """Summary metrics for a backtest run.
+
+    ``max_drawdown`` and all ``*_r`` fields are expressed in R (risk) units.
+    ``sharpe_like`` is **deprecated**: it multiplied the per-trade mean/std ratio
+    by ``sqrt(number_of_trades)``, so it mechanically grew with sample size and
+    is not comparable across runs. Prefer ``sharpe_per_trade`` (a true mean/std
+    ratio) or ``sharpe_annualized`` (with the explicit assumption recorded in
+    ``annualization_trades_per_year``).
+    """
 
     win_rate: float
     average_win: float
@@ -431,6 +439,18 @@ class BacktestMetrics(BaseModel):
     expectancy: float
     number_of_trades: int
     sharpe_like: float
+    # --- Sample-size-independent and distributional metrics (P2.1) ---
+    sharpe_per_trade: float = 0.0
+    sharpe_annualized: float = 0.0
+    annualization_trades_per_year: float = 252.0
+    expectancy_ci_low: float = 0.0
+    expectancy_ci_high: float = 0.0
+    median_r: float = 0.0
+    r_percentile_10: float = 0.0
+    r_percentile_25: float = 0.0
+    r_percentile_75: float = 0.0
+    r_percentile_90: float = 0.0
+    max_drawdown_r: float = 0.0
 
 
 class BacktestResult(BaseModel):
