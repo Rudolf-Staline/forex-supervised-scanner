@@ -213,3 +213,94 @@ result. The optimizer behaved correctly; there was simply nothing to optimize.
 
 
 <!-- PART_C_VERDICT -->
+
+---
+
+## Part C — Why is it negative? Decomposition, power, and verdict
+
+This section answers the deeper question raised by the −0.12 R OOS result. The
+sub-parts map to the brief's A/B/C/D.
+
+> Anti-p-hacking discipline followed: no subset was selected to flip the sign,
+> no threshold was retuned on OOS data, and the extended config (C.3) was frozen
+> in a script **before** it was run, with the minimum sample pre-registered.
+
+### C.1 — Decomposing the −0.12 R: gross vs net (brief Part A)
+
+Computed on the same 65 OOS trades, with bootstrap CIs:
+
+| quantity | value | 95 % bootstrap CI |
+| --- | --- | --- |
+| **gross** expectancy (before costs) | **+0.0285 R** | **[−0.0274, +0.0851]** |
+| **net** expectancy (after costs) | **−0.1191 R** | [−0.1742, −0.0639] |
+| average cost / trade | **0.1476 R** | [0.1379, 0.1575] |
+
+Exit reasons: **all 65 trades are `time_exit`** — none reached SL or TP inside the
+holding window.
+
+**Interpretation.** The gross CI **includes zero**: there is no statistically
+detectable gross edge. The net loss is almost exactly the transaction cost
+(−0.1191 ≈ 0.0285 − 0.1476). This is the brief's **first case: “gross ≈ 0 and net
+< 0 ⇒ a cost / selectivity problem”** — the signal is **not anti-predictive**
+(gross is not significantly negative), it simply carries **no gross edge**, and a
+~0.15 R/trade spread cost turns flat into negative.
+
+This is *exactly* what theory predicts on a **random walk** (the synthetic
+generator): a driftless price series cannot be forecast, so any rules engine
+nets ≈ 0 gross and loses the spread. The “all time-exit” pattern is the
+mechanism: prices wander and rarely travel far enough to hit SL/TP within
+`max_hold`, so realized P&L is tiny noise minus a fixed spread.
+
+### C.2 — Where the loss concentrates (brief Part B, descriptive only)
+
+> ⚠️ With 65 trades split many ways, **none** of these cells is large enough to
+> support a selection decision. This is descriptive mechanism-finding only; it is
+> **forbidden** (and would be p-hacking) to pick a “good” cell as a strategy.
+
+**By fold** — the loss is broad, not a single outlier; the two well-populated
+folds both lose, and gross is ≈ 0 in every fold:
+
+| fold | n | gross | net | net CI |
+| --- | --- | --- | --- | --- |
+| 0 | 1 | +0.206 | +0.096 | (degenerate) |
+| 1 | 2 | +0.041 | −0.064 | [−0.224, +0.096] |
+| 2 | 17 | −0.019 | −0.146 | [−0.256, −0.038] |
+| 3 | 45 | +0.042 | −0.116 | [−0.184, −0.051] |
+
+**By symbol** (only 2 of 5 produced OOS trades), **session**, **regime**: in
+nearly every cell **gross ≈ 0** (range −0.099 … +0.094) while **net is dragged
+down by the uniform ~0.15 R cost**. The few “less bad” cells (e.g. asia/NY gross
+≈ +0.09; weak_trend_down n=4) are small-sample noise with CIs spanning zero. The
+uniformity of gross≈0 across partitions is the tell: this is a **structureless
+series taxed by costs**, not a localized anti-signal.
+
+### C.3 — Statistical power and the pre-registered extended re-run (brief Part C)
+
+**C.3.1 Power analysis.** With observed net σ = 0.235 R, the trades needed to
+detect an expectancy of magnitude Δ at α=0.05 (two-sided), power 0.80
+(`n = (z_{α/2}+z_β)²σ²/Δ²`):
+
+| Δ (R) | trades needed | 65 enough? |
+| --- | --- | --- |
+| 0.20 | 11 | yes |
+| 0.15 | 20 | yes |
+| 0.10 | 44 | yes |
+| 0.05 | 173 | **no** |
+
+So 65 trades **was** enough to declare the −0.12 R loss real (|Δ|>0.10), but
+**not** enough to distinguish a small gross edge (±0.05 R) from zero. Caveat: this
+σ (0.235) is unusually small precisely because every trade is a time-exit with
+tiny P&L; on real data with SL/TP hits, σ ≈ 1 R, and detecting ±0.05 R would need
+**~3,000+ trades**. Power requirements on real markets are far larger than here.
+
+**C.3.2 Extended re-run.** Pre-registered config (frozen in `/tmp/edge_c.py`
+before running; outputs under `reports/extended/`): 12 symbols (EUR/USD, GBP/USD,
+USD/JPY, USD/CHF, AUD/USD, USD/CAD, NZD/USD, EUR/JPY, GBP/JPY, EUR/GBP, EUR/CHF,
+AUD/JPY), day_trading, 2025-11-01→2026-06-01 (7 months), windows 45/21/14, gate
+35, **pre-registered minimum ≥ 300 OOS trades**.
+
+<!-- EXTENDED_RESULTS -->
+
+### C.4 — Honest decision (brief Part D)
+
+<!-- FINAL_VERDICT -->
