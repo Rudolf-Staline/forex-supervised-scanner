@@ -33,6 +33,7 @@ The project remains **paper/demo only**:
 | [`../README.md`](../README.md) | Main setup, cloud/local notes, safety defaults, and feature overview. |
 | [`local_mt5_realtime_validation.md`](local_mt5_realtime_validation.md) | Local Windows/MT5 read-only market-data validation path. |
 | [`local_paper_operation_runbook.md`](local_paper_operation_runbook.md) | Human operator procedure for safe paper/demo workflow execution and report interpretation. |
+| [`data_provider_quality.md`](data_provider_quality.md) | yfinance FX data-quality limits and the pluggable `MarketDataProvider` interface. |
 
 ## Autonomous paper/demo stack
 

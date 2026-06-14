@@ -48,7 +48,13 @@ def _future(rows: list[tuple[float, float, float]]) -> pd.DataFrame:
     )
 
 
-def _simulate(future: pd.DataFrame, direction: DirectionBias = DirectionBias.LONG):
+def _simulate(
+    future: pd.DataFrame,
+    direction: DirectionBias = DirectionBias.LONG,
+    *,
+    cost_pips: float = 0.0,
+    spread_price: float | None = None,
+):
     entry_time = pd.Timestamp(datetime(2024, 12, 31, 23, 55, tzinfo=timezone.utc))
     return _simulate_trade(
         symbol="EUR/USD",
@@ -59,7 +65,7 @@ def _simulate(future: pd.DataFrame, direction: DirectionBias = DirectionBias.LON
         entry_time=entry_time,
         risk_plan=_risk_plan(),
         future=future,
-        cost_pips=0.0,
+        cost_pips=cost_pips,
         session=SessionName.LONDON,
         regime=MarketRegime.TRENDING_UP,
         technical_score=70.0,
@@ -69,6 +75,7 @@ def _simulate(future: pd.DataFrame, direction: DirectionBias = DirectionBias.LON
         final_score=70.0,
         detected_patterns=[],
         pattern_score=0.0,
+        spread_price=spread_price,
     )
 
 
@@ -129,6 +136,34 @@ def test_fill_then_take_profit_delayed_activation() -> None:
     assert trade.bars_to_activation == 2
     assert trade.exit_reason == "take_profit"
     assert trade.net_r > 0.0
+
+
+def test_data_spread_is_used_as_round_trip_cost() -> None:
+    # EUR/USD pip size is 0.0001; a 0.00020 spread == 2.0 pips of round-trip cost.
+    future = _future(
+        [
+            (1.1010, 1.0990, 1.1005),  # fills
+            (1.1120, 1.1005, 1.1110),  # take profit at 1.1100
+        ]
+    )
+    with_spread = _simulate(future, spread_price=0.00020)
+    no_cost = _simulate(future, spread_price=None, cost_pips=0.0)
+    assert with_spread is not None and no_cost is not None
+    # Risk distance is 0.0050; a 0.00020 cost reduces net R by 0.00020/0.0050 = 0.04.
+    assert with_spread.cost_pips == 2.0
+    assert abs((no_cost.net_r - with_spread.net_r) - 0.04) < 1e-6
+
+
+def test_fixed_pip_cost_used_when_spread_absent() -> None:
+    future = _future(
+        [
+            (1.1010, 1.0990, 1.1005),
+            (1.1120, 1.1005, 1.1110),
+        ]
+    )
+    trade = _simulate(future, spread_price=None, cost_pips=1.5)
+    assert trade is not None
+    assert trade.cost_pips == 1.5  # falls back to the configured fixed pip cost
 
 
 def test_same_bar_fill_and_stop_prefers_stop() -> None:

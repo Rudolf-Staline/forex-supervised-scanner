@@ -14,7 +14,7 @@ from app.backtest.outcomes import evaluate_path
 from app.config.settings import AppSettings
 from app.core.types import BacktestResult, DirectionBias, MarketRegime, RiskPlan, SessionName, SetupFamily, SetupSubtype, TIMEFRAME_MINUTES, Timeframe, TradeRecord, TradingStyle
 from app.data.providers import MarketDataProvider
-from app.data.validation import pips_to_price, window_for_bars
+from app.data.validation import pips_to_price, price_to_pips, window_for_bars
 from app.indicators.calculations import add_indicators
 from app.indicators.levels import find_key_levels
 from app.market_regime.regime import MarketRegimeDetector
@@ -59,7 +59,8 @@ class Backtester:
             "signals whose entry is never reached within the holding window are recorded as not "
             "triggered and excluded from P&L (no assumed fill).",
             "If a candle touches both SL and TP, the backtester assumes the stop loss was hit first.",
-            "Transaction cost is modeled as a fixed round-trip pip cost from settings.",
+            "Transaction cost is modeled as one full bid-ask spread per round trip, taken from the "
+            "per-symbol data spread when available and otherwise from the fixed round-trip pip cost in settings.",
         ]
         not_triggered = 0
         for symbol in symbols:
@@ -179,6 +180,7 @@ class Backtester:
                 risk_plan=risk_plan,
                 future=future.head(max_hold),
                 cost_pips=style_settings.transaction_cost_pips,
+                spread_price=spread,
                 session=score_result.session,
                 regime=setup.regime,
                 technical_score=score_result.technical_score,
@@ -224,6 +226,7 @@ def _simulate_trade(
     final_score: float,
     detected_patterns: list[str],
     pattern_score: float,
+    spread_price: float | None = None,
 ) -> TradeRecord | None:
     entry_level = float(risk_plan.entry)
 
@@ -281,7 +284,16 @@ def _simulate_trade(
         gross_profit = exit_price - float(risk_plan.entry)
     else:
         gross_profit = float(risk_plan.entry) - exit_price
-    cost_price = pips_to_price(symbol, cost_pips)
+    # Realistic round-trip cost: a long buys at the ask and exits at the bid (and
+    # vice-versa for a short), so crossing one full bid-ask spread per round trip is
+    # an honest, conservative friction. Use the per-symbol spread carried by the data
+    # (price units) when available; otherwise fall back to the fixed pip cost.
+    if spread_price is not None and spread_price > 0.0:
+        cost_price = float(spread_price)
+        effective_cost_pips = round(price_to_pips(symbol, cost_price), 4)
+    else:
+        cost_price = pips_to_price(symbol, cost_pips)
+        effective_cost_pips = cost_pips
     gross_r = gross_profit / max(risk_distance, 1e-12)
     net_r = (gross_profit - cost_price) / max(risk_distance, 1e-12)
     path_future = active_future.head(exit_bar_count) if exit_bar_count else active_future
@@ -302,7 +314,7 @@ def _simulate_trade(
         gross_r=round(gross_r, 4),
         net_r=round(net_r, 4),
         exit_reason=exit_reason,
-        cost_pips=cost_pips,
+        cost_pips=effective_cost_pips,
         session=session,
         regime=regime,
         technical_score=technical_score,
