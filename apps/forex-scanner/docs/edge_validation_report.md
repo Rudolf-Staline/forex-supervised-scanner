@@ -108,15 +108,108 @@ environment that is **not available**:
 - There is no MetaTrader5 terminal here (Windows-only), so the real-spread demo
   path is unavailable too.
 - The **only** working provider is the **synthetic generator**
-  (`SyntheticForexDataProvider`), whose prices are a deterministic
-  `trend + sine + noise` formula. Any "edge" measured on it is an **artifact of
-  that formula**, not evidence about real FX markets.
+  (`SyntheticForexDataProvider`). Inspecting the code, each symbol's price is a
+  **per-symbol seeded random walk** (`close = base + cumsum(Gaussian shocks)`)
+  plus a tiny constant drift and a seasonal sine. A random walk has, by
+  construction, **no exploitable predictive structure**, so the theoretical
+  expectation for *any* rules-based strategy on it is **gross expectancy ≈ 0**
+  and **net expectancy < 0** (eaten by the spread/cost). Any "edge" measured on
+  it is an artifact, not evidence about real FX markets. This fact is central to
+  the verdict in Part C.
 
 Consequently, Part B exercises the (now-audited) harness end-to-end on synthetic
 data to validate the *methodology and the exported artifacts*, but its numbers
 **cannot** establish a real-market edge. This is stated plainly and carried into
 the Part C verdict.
 
-<!-- PART_B_NUMBERS -->
+### B.1 — Walk-forward run (exact configuration)
+
+| Parameter | Value |
+| --- | --- |
+| Provider | synthetic (deterministic; **not** real FX) |
+| Universe | EUR/USD, GBP/USD, USD/CHF, AUD/USD, USD/JPY |
+| Style | day_trading (HTF H1 / entry M15 / trigger M5) |
+| Period | 2026-02-15 → 2026-06-01 (~3.5 months) |
+| Windows | in-sample 35 d, out-of-sample 21 d, step 14 d → **4 folds** |
+| Score grid (tuned in-sample) | 0, 50, 55, 60, 65, 70, 75 |
+| `min_in_sample_trades` | 5 |
+| Engine score gate | lowered to 35 (all families) to widen the sample and the score range |
+| Full-period trades | **282** |
+| Aggregated OOS trades | **65** |
+
+Method note: to keep cost down, one full-period backtest was computed and the
+walk-forward `segment_runner` sliced its trades by entry date. After the P1.1
+causal fix this is equivalent to per-segment runs (each bar uses only past data);
+the sole difference is that the `blocked_until` cooldown is continuous across fold
+boundaries. Exports: `reports/walk_forward.{json,txt}`.
+
+Lowering the engine gate to 35 deliberately admits low-quality setups, which
+biases expectancy **downward**; this is acceptable here because the goal is to
+test whether the *score ranks* those setups, not to showcase a curated subset.
+
+### B.2 — Score → expectancy calibration (OOS trades)
+
+Exports: `reports/score_expectancy_calibration.{json,txt}`. Monotonic
+(non-decreasing): **no**. Spearman(score, realized R) = **−0.0713**.
+
+| decile | score range | n | expectancy (R) | win % | bootstrap CI |
+| --- | --- | --- | --- | --- | --- |
+| D1 | 60.0–61.3 | 7 | −0.064 | 42.9 | [−0.203, 0.059] |
+| D2 | 61.3–62.3 | 6 | −0.029 | 33.3 | [−0.185, 0.152] |
+| D3 | 62.7–63.5 | 7 | −0.124 | 42.9 | [−0.354, 0.097] |
+| D4 | 63.5–64.5 | 6 | −0.048 | 50.0 | [−0.237, 0.140] |
+| D5 | 64.7–65.0 | 7 | −0.222 | 28.6 | [−0.383, −0.067] |
+| D6 | 65.3–66.9 | 6 | −0.167 | 16.7 | [−0.296, −0.018] |
+| D7 | 66.9–67.5 | 7 | −0.225 | 28.6 | [−0.365, −0.080] |
+| D8 | 67.6–68.6 | 6 | −0.025 | 50.0 | [−0.148, 0.106] |
+| D9 | 68.6–69.7 | 7 | −0.272 | 0.0 | [−0.390, −0.154] |
+| D10 | 70.1–72.1 | 6 | +0.037 | 66.7 | [−0.118, 0.192] |
+
+The top decile (D10) is the only positive bucket, but its CI includes zero
+(n=6) and D9 — the *second*-highest — is the **worst** bucket (0 % win rate).
+There is no monotone climb; the curve is essentially flat-to-negative noise.
+
+### B.3 — Out-of-sample synthesis
+
+**Aggregate OOS (after costs):**
+
+| metric | value |
+| --- | --- |
+| trades | 65 |
+| expectancy / trade | **−0.1191 R** |
+| expectancy bootstrap CI (95 %) | **[−0.1742, −0.0639]** |
+| profit factor | 0.30 |
+| win rate | 35.4 % |
+| max drawdown | 7.93 R |
+| Sharpe / trade | −0.51 |
+
+**By symbol** (only 2 of 5 produced any OOS trades — severe concentration):
+
+| symbol | n | expectancy | CI | win % | PF |
+| --- | --- | --- | --- | --- | --- |
+| USD/CHF | 34 | −0.071 | [−0.153, 0.014] | 44.1 | 0.54 |
+| GBP/USD | 31 | −0.172 | [−0.239, −0.104] | 25.8 | 0.09 |
+| EUR/USD, AUD/USD, USD/JPY | 0 | — | — | — | — |
+
+**By session:** london −0.225 (n=19), off_hours −0.222 (n=5), new_york −0.062
+(n=12), asia −0.050 (n=20), ny_overlap −0.069 (n=9). **By regime:** trending_up
+−0.169 (n=28), trending_down −0.103 (n=29); the only positive cells are
+weak_trend_down +0.079 (n=4) — too small to mean anything.
+
+**Per fold** (threshold tuned in-sample, reported OOS):
+
+| fold | tuned min_score | IS exp (n) | OOS exp (n) |
+| --- | --- | --- | --- |
+| 0 | 70 | +0.123 (11) | +0.096 (1) |
+| 1 | 70 | +0.163 (7) | −0.064 (2) |
+| 2 | 65 | −0.117 (17) | −0.146 (17) |
+| 3 | 60 | −0.119 (52) | −0.116 (45) |
+
+Folds 0–1 found a positive in-sample threshold but it generalized to almost no
+OOS trades (1 and 2). Folds 2–3 could not find *any* positive-expectancy
+threshold even **in-sample**, and the OOS result tracked the (negative) in-sample
+result. The optimizer behaved correctly; there was simply nothing to optimize.
+
+
 
 <!-- PART_C_VERDICT -->
