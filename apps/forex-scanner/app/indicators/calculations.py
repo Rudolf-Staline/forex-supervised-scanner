@@ -41,8 +41,25 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return enriched
 
 
-def detect_swings(df: pd.DataFrame, window: int = 3) -> tuple[pd.Series, pd.Series]:
-    """Detect centered swing highs and lows with a symmetric lookback window."""
+def detect_swings(df: pd.DataFrame, window: int = 3, *, causal: bool = True) -> tuple[pd.Series, pd.Series]:
+    """Detect swing highs and lows using a symmetric pivot window.
+
+    A swing pivot at bar ``i`` is only mathematically confirmable once the
+    ``window`` bars *after* ``i`` have printed. With ``causal=True`` (the
+    default), the detected pivot price is therefore published at its
+    *confirmation* bar ``i + window`` rather than at the centred bar ``i``.
+
+    This guarantees look-ahead-free parity: for any cut-off timestamp ``T``,
+    the swing columns on the slice ``[:T]`` depend only on OHLC bars at or
+    before ``T``. Computing indicators on the full history and then slicing
+    ``[:T]`` yields exactly the same swing values as computing indicators on
+    the truncated history ``<= T``. The scanner (live) and the backtester thus
+    "know" a swing at the same moment.
+
+    ``causal=False`` restores the legacy centred placement and is retained only
+    for introspection/visualisation; it must not be used to derive stops or any
+    decision input, as it leaks future bars.
+    """
 
     if window < 1:
         raise ValueError("swing window must be positive")
@@ -51,6 +68,7 @@ def detect_swings(df: pd.DataFrame, window: int = 3) -> tuple[pd.Series, pd.Seri
     swing_high = np.full(len(df), np.nan)
     swing_low = np.full(len(df), np.nan)
     span = window * 2 + 1
+    offset = window if causal else 0
 
     for idx in range(window, len(df) - window):
         high_slice = high[idx - window : idx + window + 1]
@@ -58,9 +76,9 @@ def detect_swings(df: pd.DataFrame, window: int = 3) -> tuple[pd.Series, pd.Seri
         if len(high_slice) != span or len(low_slice) != span:
             continue
         if high[idx] == np.max(high_slice) and np.sum(high_slice == high[idx]) == 1:
-            swing_high[idx] = high[idx]
+            swing_high[idx + offset] = high[idx]
         if low[idx] == np.min(low_slice) and np.sum(low_slice == low[idx]) == 1:
-            swing_low[idx] = low[idx]
+            swing_low[idx + offset] = low[idx]
 
     return pd.Series(swing_high, index=df.index), pd.Series(swing_low, index=df.index)
 

@@ -20,7 +20,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.config.safety import demo_safety_status
 from app.config.settings import AppSettings, PROJECT_ROOT
-from app.config.watchlists import get_watchlist
 from app.core.types import Timeframe, TradingStyle
 from app.data.providers import MarketDataProvider
 from app.execution.autonomous_evidence import AutonomousEvidenceConfig, AutonomousEvidenceFinalStatus, AutonomousEvidenceMode, build_evidence
@@ -28,6 +27,7 @@ from app.execution.autonomous_policy import AutonomousPolicyContext, AutonomousP
 from app.execution.autonomous_readiness import AutonomousReadinessConfig, AutonomousReadinessFinalStatus, build_readiness_report
 from app.execution.autonomous_recovery import AutonomousRecoveryConfig, build_recovery_plan
 from app.execution.autonomous_supervisor import AutonomousSupervisorConfig, AutonomousSupervisorService
+from app.execution.supervisor_common import resolve_supervisor_symbols
 from app.execution.realtime_paper_positions import RealtimePaperPositionConfig, RealtimePaperPositionManagerService, RealtimePaperPositionReport
 from app.execution.realtime_data_health import (
     RealtimeDataHealthConfig,
@@ -545,11 +545,7 @@ def export_realtime_paper_supervisor_txt(report: RealtimePaperSupervisorReport, 
 
 
 def symbols_from_args(symbols: list[str] | None, watchlist: str | None) -> list[str]:
-    if symbols:
-        return [symbol.strip().upper() for symbol in symbols if symbol.strip()]
-    if watchlist:
-        return get_watchlist(watchlist)
-    return ["EUR/USD"]
+    return resolve_supervisor_symbols(symbols, watchlist, default=["EUR/USD"])
 
 
 def _operator_block_reasons(controls: dict[str, object]) -> list[str]:

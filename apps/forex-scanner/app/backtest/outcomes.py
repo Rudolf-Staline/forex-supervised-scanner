@@ -30,8 +30,20 @@ class PathOutcome:
     bars_to_tp3: int | None
 
 
-def evaluate_path(direction: DirectionBias, risk_plan: RiskPlan, future: pd.DataFrame, exit_reason: ExitReason, net_r: float) -> PathOutcome:
-    """Evaluate TP hits, MAE/MFE, event timing, and a richer outcome label."""
+def evaluate_path(
+    direction: DirectionBias,
+    risk_plan: RiskPlan,
+    future: pd.DataFrame,
+    exit_reason: ExitReason,
+    net_r: float,
+    bars_to_activation: int = 0,
+) -> PathOutcome:
+    """Evaluate TP hits, MAE/MFE, event timing, and a richer outcome label.
+
+    ``future`` must already start at the activation (fill) bar; ``bars_to_activation``
+    records how many bars after the signal the planned entry was actually reached
+    (0 when the path is measured from the signal bar itself, e.g. legacy callers).
+    """
 
     risk = abs(float(risk_plan.entry) - float(risk_plan.stop_loss))
     if risk <= 0.0:
@@ -42,7 +54,7 @@ def evaluate_path(direction: DirectionBias, risk_plan: RiskPlan, future: pd.Data
             tp3_hit=False,
             mae=0.0,
             mfe=0.0,
-            bars_to_activation=0,
+            bars_to_activation=bars_to_activation,
             bars_to_invalidation=None,
             bars_to_tp1=None,
             bars_to_tp2=None,
@@ -106,7 +118,7 @@ def evaluate_path(direction: DirectionBias, risk_plan: RiskPlan, future: pd.Data
         tp3_hit=tp3_hit,
         mae=round(mae, 4),
         mfe=round(mfe, 4),
-        bars_to_activation=0,
+        bars_to_activation=bars_to_activation,
         bars_to_invalidation=bars_to_invalidation,
         bars_to_tp1=bars_to_tp1,
         bars_to_tp2=bars_to_tp2,

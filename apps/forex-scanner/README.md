@@ -70,6 +70,25 @@ python -m pytest tests/test_session_wait_mode.py
 - Les tests cloud utilisent mocks, stubs ou skips.
 - Ne jamais stocker d'identifiants broker dans le repo.
 
+## Backtest integrity (look-ahead-free swings)
+
+Les swings (`swing_high` / `swing_low`) sont désormais **causaux** : un pivot
+détecté à la barre `i` n'est publié qu'à sa barre de confirmation `i + window`
+(voir `app/indicators/calculations.py::detect_swings`). Avant ce correctif, les
+indicateurs étaient calculés une seule fois sur tout l'historique puis découpés
+par `.loc[:timestamp]`, de sorte que les swings proches du timestamp étaient
+confirmés avec des barres **postérieures** (fuite look-ahead). Le placement de
+stop dans `app/setups/detector.py::_stop_candidates` consommait ces swings, ce
+qui biaisait le backtest de façon invisible en scan live.
+
+> ⚠️ **Les résultats de backtest changent après ce correctif.** Les chiffres
+> antérieurs étaient **surévalués** (stops ajustés avec information future). Le
+> scanner live et le backtester « connaissent » maintenant un swing au même
+> instant. Le test de régression `tests/test_indicators.py::
+> test_causal_swings_have_no_look_ahead_leak` garantit la parité :
+> les colonnes swing sur le slice `[:T]` sont identiques à celles obtenues en
+> ne calculant les indicateurs que sur les données `<= T`.
+
 ## Documentation Index
 
 For a central map of the paper/demo operator stack, safety layers, realtime workflow, reporting tools, analytics, audits, and smoke commands, see [`docs/index.md`](docs/index.md).
