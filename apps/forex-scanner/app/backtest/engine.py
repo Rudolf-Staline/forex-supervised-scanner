@@ -55,15 +55,25 @@ class Backtester:
         all_trades: list[TradeRecord] = []
         limitations = [
             "Signals are evaluated at completed candle closes and are not intrabar forecasts.",
+            "A signal is only filled when a later bar trades through the planned entry price; "
+            "signals whose entry is never reached within the holding window are recorded as not "
+            "triggered and excluded from P&L (no assumed fill).",
             "If a candle touches both SL and TP, the backtester assumes the stop loss was hit first.",
             "Transaction cost is modeled as a fixed round-trip pip cost from settings.",
         ]
+        not_triggered = 0
         for symbol in symbols:
             try:
-                all_trades.extend(self._run_symbol(symbol, style, setup_filter, start, end))
+                symbol_trades, symbol_not_triggered = self._run_symbol(symbol, style, setup_filter, start, end)
+                all_trades.extend(symbol_trades)
+                not_triggered += symbol_not_triggered
             except Exception as exc:
                 LOGGER.exception("backtest symbol failed", extra={"symbol": symbol, "style": style.value})
                 limitations.append(f"{symbol}: skipped because {exc}")
+        if not_triggered:
+            limitations.append(
+                f"{not_triggered} qualifying signal(s) were not triggered (entry never reached) and excluded from P&L."
+            )
 
         all_trades.sort(key=lambda trade: trade.exit_time)
         equity_curve: list[tuple[datetime, float]] = [(start, 0.0)]
@@ -96,7 +106,7 @@ class Backtester:
         setup_filter: SetupFamily | Literal["all"],
         start: datetime,
         end: datetime,
-    ) -> list[TradeRecord]:
+    ) -> tuple[list[TradeRecord], int]:
         style_settings = self.settings.styles[style]
         higher_tf = style_settings.higher_timeframe
         entry_tf = style_settings.entry_timeframe
@@ -108,6 +118,7 @@ class Backtester:
 
         evaluation_times = [timestamp for timestamp in entry.loc[start:end].index if timestamp in entry.index]
         trades: list[TradeRecord] = []
+        not_triggered = 0
         blocked_until = start
         for timestamp in evaluation_times:
             if timestamp <= blocked_until:
@@ -178,9 +189,12 @@ class Backtester:
                 detected_patterns=setup.detected_patterns,
                 pattern_score=setup.pattern_score,
             )
+            if trade is None:
+                not_triggered += 1
+                continue
             trades.append(trade)
             blocked_until = trade.exit_time
-        return trades
+        return trades, not_triggered
 
     def _fetch(self, symbol: str, timeframe: Timeframe, start: datetime, end: datetime) -> pd.DataFrame:
         fallback_window = window_for_bars(timeframe, self.settings.provider.max_bars, end)
@@ -210,13 +224,30 @@ def _simulate_trade(
     final_score: float,
     detected_patterns: list[str],
     pattern_score: float,
-) -> TradeRecord:
+) -> TradeRecord | None:
+    entry_level = float(risk_plan.entry)
+
+    # Fill modeling: the planned entry behaves like a resting order. It is only
+    # filled when a later bar trades through ``entry_level`` (low <= entry <= high).
+    # If the entry is never reached within the holding window, the signal is not
+    # triggered: we return None so the caller excludes it from P&L (no assumed fill).
+    activation_index: int | None = None
+    for position, (_timestamp, row) in enumerate(future.iterrows()):
+        if float(row["low"]) <= entry_level <= float(row["high"]):
+            activation_index = position
+            break
+    if activation_index is None:
+        return None
+
+    bars_to_activation = activation_index + 1
+    active_future = future.iloc[activation_index:]
+
     exit_reason: Literal["take_profit", "stop_loss", "time_exit", "end_of_data"] = "end_of_data"
     exit_price = float(risk_plan.entry)
     exit_time = entry_time.to_pydatetime() if hasattr(entry_time, "to_pydatetime") else entry_time
     exit_bar_count = 0
 
-    for bar_number, (timestamp, row) in enumerate(future.iterrows(), start=1):
+    for bar_number, (timestamp, row) in enumerate(active_future.iterrows(), start=1):
         high = float(row["high"])
         low = float(row["low"])
         if direction == DirectionBias.LONG:
@@ -238,12 +269,12 @@ def _simulate_trade(
             exit_bar_count = bar_number
             break
     else:
-        if not future.empty:
-            last = future.iloc[-1]
+        if not active_future.empty:
+            last = active_future.iloc[-1]
             exit_price = float(last["close"])
-            exit_time = future.index[-1].to_pydatetime()
+            exit_time = active_future.index[-1].to_pydatetime()
             exit_reason = "time_exit"
-            exit_bar_count = len(future)
+            exit_bar_count = len(active_future)
 
     risk_distance = abs(float(risk_plan.entry) - float(risk_plan.stop_loss))
     if direction == DirectionBias.LONG:
@@ -253,8 +284,8 @@ def _simulate_trade(
     cost_price = pips_to_price(symbol, cost_pips)
     gross_r = gross_profit / max(risk_distance, 1e-12)
     net_r = (gross_profit - cost_price) / max(risk_distance, 1e-12)
-    path_future = future.head(exit_bar_count) if exit_bar_count else future
-    path = evaluate_path(direction, risk_plan, path_future, exit_reason, net_r)
+    path_future = active_future.head(exit_bar_count) if exit_bar_count else active_future
+    path = evaluate_path(direction, risk_plan, path_future, exit_reason, net_r, bars_to_activation=bars_to_activation)
 
     return TradeRecord(
         symbol=symbol,
