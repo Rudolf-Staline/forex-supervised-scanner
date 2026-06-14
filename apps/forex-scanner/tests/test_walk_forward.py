@@ -92,13 +92,37 @@ def test_evaluate_fold_reports_only_out_of_sample_trades() -> None:
     assert fold.out_of_sample_metrics.expectancy == 0.5
 
 
+def test_run_walk_forward_segments_are_disjoint_at_boundary() -> None:
+    config = WalkForwardConfig(in_sample_days=20, out_of_sample_days=10, step_days=10, score_grid=(0.0,), min_in_sample_trades=1)
+    calls: list[tuple[str, datetime, datetime]] = []
+
+    def runner(symbols, style, setup_filter, start, end):  # noqa: ANN001
+        kind = "IS" if (end - start) > timedelta(days=15) else "OOS"
+        calls.append((kind, start, end))
+        return BacktestResult(
+            run_id="x", created_at=BASE, symbols=symbols, style=style, setup_filter=setup_filter,
+            start=start, end=end,
+            metrics=__import__("app.backtest.metrics", fromlist=["calculate_metrics"]).calculate_metrics([]),
+            trades=[], equity_curve=[], limitations=[],
+        )
+
+    run_walk_forward(runner, ["EUR/USD"], TradingStyle.DAY_TRADING, "all", BASE, BASE + timedelta(days=60), config)
+
+    # For each fold the IS end must be strictly before the OOS start (no shared bar).
+    is_calls = [c for c in calls if c[0] == "IS"]
+    oos_calls = [c for c in calls if c[0] == "OOS"]
+    assert is_calls and oos_calls
+    for (_, _, is_end), (_, oos_start, _) in zip(is_calls, oos_calls, strict=True):
+        assert is_end < oos_start
+
+
 def test_run_walk_forward_aggregates_oos_only(tmp_path) -> None:
     config = WalkForwardConfig(in_sample_days=20, out_of_sample_days=10, step_days=10, score_grid=(0.0, 70.0), min_in_sample_trades=3)
 
     def runner(symbols, style, setup_filter, start, end):  # noqa: ANN001
         # In-sample segments (length 20d) get a mixed sample favouring high scores;
         # out-of-sample segments (length 10d) get one winning high-score trade.
-        is_segment = (end - start) == timedelta(days=20)
+        is_segment = (end - start) > timedelta(days=15)
         if is_segment:
             trades = [_trade(-1.0, 50.0, day=0) for _ in range(4)] + [_trade(1.2, 80.0, day=1) for _ in range(4)]
         else:

@@ -211,8 +211,15 @@ def run_walk_forward(
     windows = generate_windows(start, end, config)
     folds: list[FoldResult] = []
     for window in windows:
+        # The in-sample and out-of-sample windows share the boundary instant
+        # (out_of_sample_start == in_sample_end). The Backtester treats date
+        # ranges as inclusive on both ends, so we make the in-sample run end
+        # strictly *before* the boundary bar. The boundary bar then belongs only
+        # to the out-of-sample segment: train and test ranges are disjoint by
+        # construction, independent of any backtester warm-up behaviour.
+        in_sample_end_exclusive = window.in_sample_end - timedelta(microseconds=1)
         in_sample_result = segment_runner(
-            symbols, style, setup_filter, window.in_sample_start, window.in_sample_end
+            symbols, style, setup_filter, window.in_sample_start, in_sample_end_exclusive
         )
         oos_result = segment_runner(
             symbols, style, setup_filter, window.out_of_sample_start, window.out_of_sample_end
