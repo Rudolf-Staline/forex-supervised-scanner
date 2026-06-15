@@ -19,13 +19,17 @@ Paper/demo only: nothing here sends orders.
 from __future__ import annotations
 
 import json
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from app.backtest.metrics import calculate_metrics
 from app.core.types import BacktestMetrics, BacktestResult, SetupFamily, TradeRecord, TradingStyle
+
+if TYPE_CHECKING:
+    from app.config.settings import AppSettings
 
 
 DEFAULT_SCORE_GRID: tuple[float, ...] = (0.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0)
@@ -191,6 +195,36 @@ def evaluate_fold(
     )
 
 
+def _evaluate_single_fold(
+    segment_runner: SegmentRunner,
+    window: WalkForwardWindow,
+    symbols: list[str],
+    style: TradingStyle,
+    setup_filter: SetupFamily | Literal["all"],
+    config: WalkForwardConfig,
+) -> FoldResult:
+    """Run one fold: in-sample tuning + out-of-sample evaluation.
+
+    Shared by the sequential (:func:`run_walk_forward`) and parallel
+    (:func:`run_walk_forward_parallel`) paths so a fold is computed identically
+    regardless of how it is scheduled.
+
+    The in-sample and out-of-sample windows share the boundary instant
+    (``out_of_sample_start == in_sample_end``). The Backtester treats date ranges
+    as inclusive on both ends, so the in-sample run ends strictly *before* the
+    boundary bar. The boundary bar then belongs only to the out-of-sample segment:
+    train and test ranges are disjoint by construction.
+    """
+    in_sample_end_exclusive = window.in_sample_end - timedelta(microseconds=1)
+    in_sample_result = segment_runner(
+        symbols, style, setup_filter, window.in_sample_start, in_sample_end_exclusive
+    )
+    oos_result = segment_runner(
+        symbols, style, setup_filter, window.out_of_sample_start, window.out_of_sample_end
+    )
+    return evaluate_fold(window, in_sample_result.trades, oos_result.trades, config)
+
+
 def run_walk_forward(
     segment_runner: SegmentRunner,
     symbols: list[str],
@@ -209,22 +243,10 @@ def run_walk_forward(
     """
 
     windows = generate_windows(start, end, config)
-    folds: list[FoldResult] = []
-    for window in windows:
-        # The in-sample and out-of-sample windows share the boundary instant
-        # (out_of_sample_start == in_sample_end). The Backtester treats date
-        # ranges as inclusive on both ends, so we make the in-sample run end
-        # strictly *before* the boundary bar. The boundary bar then belongs only
-        # to the out-of-sample segment: train and test ranges are disjoint by
-        # construction, independent of any backtester warm-up behaviour.
-        in_sample_end_exclusive = window.in_sample_end - timedelta(microseconds=1)
-        in_sample_result = segment_runner(
-            symbols, style, setup_filter, window.in_sample_start, in_sample_end_exclusive
-        )
-        oos_result = segment_runner(
-            symbols, style, setup_filter, window.out_of_sample_start, window.out_of_sample_end
-        )
-        folds.append(evaluate_fold(window, in_sample_result.trades, oos_result.trades, config))
+    folds: list[FoldResult] = [
+        _evaluate_single_fold(segment_runner, window, symbols, style, setup_filter, config)
+        for window in windows
+    ]
 
     aggregate_trades: list[TradeRecord] = []
     for fold in folds:
@@ -365,3 +387,157 @@ def _passes(trade: TradeRecord, threshold: float) -> bool:
     if threshold <= 0.0:
         return True
     return trade.final_score is not None and trade.final_score >= threshold
+
+
+# ---------------------------------------------------------------------------
+# Parallel walk-forward  (--jobs N)
+# ---------------------------------------------------------------------------
+#
+# Parallelisable unit:  one fold = one WalkForwardWindow. Folds are mutually
+# independent — each runs its own in-sample + out-of-sample backtests and tunes
+# its threshold using ONLY its own in-sample fold (no cross-fold state).
+#
+# Centralised (must NOT move into workers): the final reassembly. Folds are
+# sorted into the canonical order (fold_index) on the parent process before
+# aggregation; the aggregate trade pool is then sorted by exit_time exactly as
+# the sequential path does. This makes every downstream figure — dedup, equity
+# curve, aggregate metrics and bootstrap IC — independent of worker finish order.
+#
+# The threshold selection here is per-fold (in-sample only), so it already lives
+# inside each worker. It is NOT a global inter-symbol selection, so nothing about
+# it needs to be hoisted to the parent.
+
+
+class RunnerFactory(Protocol):
+    """Picklable factory that builds a :class:`SegmentRunner` inside a worker.
+
+    A *factory* (rather than a ready-made runner) is sent across the process
+    boundary because :class:`~app.backtest.engine.Backtester` instances and their
+    providers are not meant to be pickled and shared; instead each worker builds
+    its own, reading its own data locally (minimal IPC, no large DataFrames on
+    the wire).
+    """
+
+    def __call__(self) -> SegmentRunner: ...
+
+
+class _BacktesterRunnerFactory:
+    """Default factory: build a fresh provider + :class:`Backtester` per worker.
+
+    Holds only the (picklable) :class:`AppSettings`. Each worker process calls
+    ``build_provider(settings)`` and constructs its own backtester, so no heavy
+    state crosses the process boundary.
+    """
+
+    def __init__(self, settings: "AppSettings") -> None:
+        self._settings = settings
+
+    def __call__(self) -> SegmentRunner:
+        from app.backtest.engine import Backtester
+        from app.data.providers import build_provider
+
+        provider = build_provider(self._settings)
+        backtester = Backtester(self._settings, provider, database=None)
+        return backtester_segment_runner(backtester)
+
+
+@dataclass(frozen=True)
+class _FoldTask:
+    """Serialisable work unit passed to each ProcessPoolExecutor worker."""
+
+    window: WalkForwardWindow
+    symbols: tuple[str, ...]
+    style: TradingStyle
+    setup_filter: SetupFamily | Literal["all"]
+    config: WalkForwardConfig
+    runner_factory: RunnerFactory
+
+
+def _fold_worker(task: _FoldTask) -> FoldResult:
+    """Top-level (picklable) entry point executed inside each worker process."""
+    runner = task.runner_factory()
+    return _evaluate_single_fold(
+        runner, task.window, list(task.symbols), task.style, task.setup_filter, task.config
+    )
+
+
+def run_walk_forward_parallel(
+    settings: "AppSettings | None",
+    symbols: list[str],
+    style: TradingStyle,
+    setup_filter: SetupFamily | Literal["all"],
+    start: datetime,
+    end: datetime,
+    config: WalkForwardConfig,
+    *,
+    n_jobs: int,
+    runner_factory: RunnerFactory | None = None,
+) -> WalkForwardReport:
+    """Walk-forward using *n_jobs* worker processes.
+
+    Produces results **rigorously identical** to :func:`run_walk_forward`
+    (``--jobs 1``): parallelisation changes only scheduling, never computation.
+    Folds are sorted into canonical order (``fold_index``) on the parent process
+    before aggregation, so the dedup, equity curve, aggregate metrics and
+    bootstrap IC are independent of which worker finishes first.
+
+    Parameters
+    ----------
+    settings:
+        Full application settings (picklable pydantic model) used to build the
+        default per-worker backtester. May be ``None`` only when an explicit
+        ``runner_factory`` is supplied (e.g. in tests).
+    n_jobs:
+        Number of worker processes (>= 1).
+    runner_factory:
+        Optional picklable factory overriding the default settings-based
+        backtester construction. Each worker calls it to obtain its own
+        :class:`SegmentRunner`.
+    """
+    if runner_factory is None:
+        if settings is None:
+            raise ValueError("settings is required when runner_factory is not provided")
+        runner_factory = _BacktesterRunnerFactory(settings)
+
+    windows = generate_windows(start, end, config)
+    tasks = [
+        _FoldTask(
+            window=window,
+            symbols=tuple(symbols),
+            style=style,
+            setup_filter=setup_filter,
+            config=config,
+            runner_factory=runner_factory,
+        )
+        for window in windows
+    ]
+
+    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        fold_results = list(executor.map(_fold_worker, tasks))
+
+    # Canonical reassembly — deterministic regardless of worker completion order.
+    folds = sorted(fold_results, key=lambda f: f.window.fold_index)
+
+    # Aggregation below is byte-for-byte identical to run_walk_forward.
+    aggregate_trades: list[TradeRecord] = []
+    for fold in folds:
+        aggregate_trades.extend(fold.oos_trade_records)
+    aggregate_trades.sort(key=lambda trade: trade.exit_time)
+
+    equity_curve: list[tuple[datetime, float]] = [(start, 0.0)]
+    cumulative = 0.0
+    for trade in aggregate_trades:
+        cumulative += trade.net_r
+        equity_curve.append((trade.exit_time, round(cumulative, 4)))
+
+    return WalkForwardReport(
+        config=config,
+        symbols=list(symbols),
+        style=style,
+        setup_filter=setup_filter,
+        start=start,
+        end=end,
+        folds=folds,
+        aggregate_metrics=calculate_metrics(aggregate_trades),
+        oos_equity_curve=equity_curve,
+    )
