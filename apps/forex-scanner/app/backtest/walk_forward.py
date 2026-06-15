@@ -18,6 +18,7 @@ Paper/demo only: nothing here sends orders.
 
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -331,15 +332,76 @@ def report_to_text(report: WalkForwardReport) -> str:
     return "\n".join(lines) + "\n"
 
 
+def deduplicated_oos_trades(report: WalkForwardReport) -> list[TradeRecord]:
+    """Return each out-of-sample trade exactly once.
+
+    Because ``step`` (e.g. 14 d) can be shorter than ``out_of_sample`` (e.g. 21 d),
+    consecutive OOS windows overlap and a trade can appear in several folds. We
+    keep the first occurrence (earliest fold) keyed by ``(symbol, entry_time)``,
+    so the aggregate is an honest, non-double-counted sample.
+    """
+
+    seen: set[tuple[str, object]] = set()
+    unique: list[TradeRecord] = []
+    for fold in report.folds:
+        for trade in fold.oos_trade_records:
+            key = (trade.symbol, trade.entry_time)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(trade)
+    unique.sort(key=lambda trade: (trade.entry_time, trade.symbol))
+    return unique
+
+
+def oos_registry_rows(report: WalkForwardReport) -> list[dict[str, object]]:
+    """Build the deduplicated OOS trade registry (one row per unique trade)."""
+
+    rows: list[dict[str, object]] = []
+    for trade in deduplicated_oos_trades(report):
+        entry = trade.entry_time
+        rows.append(
+            {
+                "pair": trade.symbol,
+                "timestamp": entry.isoformat() if hasattr(entry, "isoformat") else str(entry),
+                "score": "" if trade.final_score is None else round(float(trade.final_score), 6),
+                "gross_r": round(float(trade.gross_r), 6),
+                "net_r": round(float(trade.net_r), 6),
+                "exit_reason": trade.exit_reason,
+            }
+        )
+    return rows
+
+
+def write_oos_registry(report: WalkForwardReport, path: Path) -> Path:
+    """Write the deduplicated OOS trade registry as CSV.
+
+    Columns: ``pair, timestamp, score, gross_r, net_r, exit_reason``. This is the
+    single artifact consumed downstream (edge_decomposition, calibration) so no
+    re-backtest is ever needed.
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = oos_registry_rows(report)
+    fieldnames = ["pair", "timestamp", "score", "gross_r", "net_r", "exit_reason"]
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return path
+
+
 def write_reports(report: WalkForwardReport, output_dir: Path) -> dict[str, Path]:
-    """Write ``walk_forward.json`` and ``walk_forward.txt`` into ``output_dir``."""
+    """Write ``walk_forward.json``, ``walk_forward.txt`` and the dedup OOS registry."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
     json_path = output_dir / "walk_forward.json"
     text_path = output_dir / "walk_forward.txt"
+    registry_path = output_dir / "oos_trade_registry.csv"
     json_path.write_text(json.dumps(report_to_dict(report), indent=2, sort_keys=True) + "\n", encoding="utf-8")
     text_path.write_text(report_to_text(report), encoding="utf-8")
-    return {"json": json_path, "txt": text_path}
+    write_oos_registry(report, registry_path)
+    return {"json": json_path, "txt": text_path, "registry": registry_path}
 
 
 def _metrics_to_dict(metrics: BacktestMetrics) -> dict[str, object]:
