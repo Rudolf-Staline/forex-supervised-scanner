@@ -81,7 +81,9 @@ Contract for any implementation:
 
 Existing implementations: `YahooFinanceProvider` (`name="yahoo"`),
 `SyntheticForexDataProvider` (`name="synthetic"`, emits a realistic `spread`),
-`MetaTrader5Provider` (`name="mt5"`, real broker spreads), and
+`MetaTrader5Provider` (`name="mt5"`, real broker spreads),
+`CsvHistoricalProvider` (`name="csv"`, real OHLCV from `data/real/*.csv`, no
+network, **no synthetic fallback** — see `data/real/README.md`), and
 `AutoFallbackProvider` (MT5 → Yahoo → synthetic).
 
 ### Adding a new vendor (no engine changes)

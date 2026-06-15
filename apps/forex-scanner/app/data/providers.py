@@ -395,6 +395,114 @@ class MetaTrader5Provider(MarketDataProvider):
                 shutdown()
 
 
+class CsvHistoricalProvider(MarketDataProvider):
+    """Real OHLCV history loaded from local CSV files.
+
+    Cloud-safe source of *real* market data: no network and no synthetic
+    fallback. Files live under ``settings.csv_data_dir`` (default ``data/real``)
+    and are named ``<SYMBOL><TIMEFRAME>.csv`` where the symbol slash is removed
+    and the timeframe is the :class:`Timeframe` value, e.g. ``EURUSD_H1.csv``,
+    ``EURUSD_M15.csv``, ``EURUSD_M5.csv``.
+
+    Required CSV columns (header row, case-insensitive):
+    ``timestamp, open, high, low, close, volume`` and optional ``spread``.
+    ``timestamp`` must be UTC-parseable (ISO-8601 like ``2026-01-02T08:00:00Z``
+    or epoch seconds). ``spread`` is in **price units** (e.g. ``0.00012`` for
+    EUR/USD), consumed as the per-trade round-trip cost by the backtester.
+
+    Fails **loudly** (``DataProviderError``) on a missing directory/file, an
+    empty file, a missing required column, or too few clean rows. It never falls
+    back to synthetic data, so a data problem can never be mistaken for valid
+    history.
+    """
+
+    name = "csv"
+    _REQUIRED_COLUMNS = ("timestamp", "open", "high", "low", "close", "volume")
+
+    def __init__(self, settings: ProviderSettings, *, data_dir: str | None = None, min_rows: int = 220) -> None:
+        self.settings = settings
+        self.data_dir = data_dir if data_dir is not None else settings.csv_data_dir
+        self.min_rows = min_rows
+        self._resolver = None
+
+    def file_path(self, symbol: str, timeframe: Timeframe) -> str:
+        normalized = symbol.replace("/", "").upper()
+        return os.path.join(self.data_dir, f"{normalized}_{timeframe.value}.csv")
+
+    def get_ohlcv(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> pd.DataFrame:
+        path = self.file_path(symbol, timeframe)
+        if not os.path.isdir(self.data_dir):
+            raise DataProviderError(
+                f"CSV data directory not found: '{self.data_dir}'. Create it and add real OHLCV "
+                f"files named like '{os.path.basename(path)}'."
+            )
+        if not os.path.isfile(path):
+            raise DataProviderError(
+                f"No real CSV history for {symbol} {timeframe.value}: expected file '{path}' "
+                f"with columns {', '.join(self._REQUIRED_COLUMNS)} (+ optional 'spread')."
+            )
+        try:
+            raw = pd.read_csv(path)
+        except Exception as exc:  # noqa: BLE001 - surface any parse failure loudly
+            raise DataProviderError(f"failed to read CSV '{path}': {exc}") from exc
+
+        if raw.empty:
+            raise DataProviderError(f"CSV '{path}' is empty")
+        raw.columns = [str(column).strip().lower() for column in raw.columns]
+        missing = [column for column in self._REQUIRED_COLUMNS if column not in raw.columns]
+        if missing:
+            raise DataProviderError(
+                f"CSV '{path}' is missing required column(s): {', '.join(missing)}. "
+                f"Required: {', '.join(self._REQUIRED_COLUMNS)} (+ optional 'spread')."
+            )
+
+        timestamps = pd.to_datetime(raw["timestamp"], utc=True, errors="coerce")
+        if timestamps.isna().all():
+            raise DataProviderError(f"CSV '{path}' has no parseable UTC timestamps in column 'timestamp'")
+        # Use numpy arrays to avoid pandas index-alignment against the CSV RangeIndex.
+        frame = pd.DataFrame(
+            {
+                "open": raw["open"].to_numpy(),
+                "high": raw["high"].to_numpy(),
+                "low": raw["low"].to_numpy(),
+                "close": raw["close"].to_numpy(),
+                "volume": raw["volume"].to_numpy(),
+            },
+            index=pd.DatetimeIndex(timestamps),
+        )
+        if "spread" in raw.columns:
+            frame["spread"] = raw["spread"].to_numpy()
+        frame = frame[~frame.index.isna()]
+
+        duplicate_bars = int(frame.index.duplicated().sum())
+        if start is not None:
+            frame = frame[frame.index >= _as_utc(start)]
+        if end is not None:
+            frame = frame[frame.index <= _as_utc(end)]
+
+        try:
+            cleaned = validate_ohlcv(frame, min_rows=self.min_rows)
+        except Exception as exc:  # noqa: BLE001 - re-raise as provider error, never fall back
+            raise DataProviderError(f"CSV '{path}' failed OHLCV validation: {exc}") from exc
+
+        cleaned = attach_data_quality(cleaned, timeframe=timeframe, end=end, duplicate_bars=duplicate_bars, resampled=False)
+        cleaned.attrs["provider"] = self.name
+        cleaned.attrs["source_file"] = path
+        cleaned.attrs["spread_available"] = bool(cleaned["spread"].notna().any())
+        return cleaned
+
+
+def _as_utc(value: datetime) -> pd.Timestamp:
+    ts = pd.Timestamp(value)
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+
+
 def build_provider(settings: AppSettings) -> MarketDataProvider:
     """Create the configured data provider."""
 
@@ -404,6 +512,9 @@ def build_provider(settings: AppSettings) -> MarketDataProvider:
         if synthetic is None:
             raise DataProviderError("synthetic provider is disabled in production")
         return synthetic
+    if settings.provider.name == "csv":
+        # Real-data path: never falls back to synthetic, by design.
+        return CsvHistoricalProvider(settings.provider)
     if settings.provider.name == "yahoo":
         return YahooFinanceProvider(settings.provider)
     if settings.provider.name == "mt5":

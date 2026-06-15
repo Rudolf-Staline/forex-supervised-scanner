@@ -28,7 +28,7 @@ from app.reporting.score_expectancy import build_report, report_to_text, write_r
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Score->expectancy calibration. Reporting only; no orders are sent.")
-    parser.add_argument("--provider", default="synthetic", choices=["synthetic", "auto", "mt5"])
+    parser.add_argument("--provider", default="synthetic", choices=["synthetic", "auto", "mt5", "csv"])
     parser.add_argument("--watchlist", default=None, choices=watchlist_names())
     parser.add_argument("--symbols", nargs="+", default=None, help="Explicit symbols. Overrides --watchlist.")
     parser.add_argument("--style", default=TradingStyle.DAY_TRADING.value, choices=[style.value for style in TradingStyle])

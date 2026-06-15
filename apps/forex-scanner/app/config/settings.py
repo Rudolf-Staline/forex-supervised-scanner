@@ -19,12 +19,13 @@ LOCAL_SETTINGS_PATH = PROJECT_ROOT / "config" / "settings.json"
 class ProviderSettings(BaseModel):
     """Market data provider configuration."""
 
-    name: Literal["auto", "yahoo", "synthetic", "mt5"] = "auto"
+    name: Literal["auto", "yahoo", "synthetic", "mt5", "csv"] = "auto"
     environment: Literal["development", "test", "production"] = "development"
     fallback_to_synthetic: bool = True
     allow_synthetic_in_production: bool = False
     synthetic_seed: int = 42690
     max_bars: int = Field(default=650, ge=220, le=5000)
+    csv_data_dir: str = "data/real"
 
     @model_validator(mode="after")
     def prevent_unapproved_synthetic_production(self) -> "ProviderSettings":

@@ -54,6 +54,92 @@ est en Parties A–C ci-dessous.
 
 ---
 
+## VALIDATION SUR DONNÉES RÉELLES (statut : EN ATTENTE DE DONNÉES)
+
+Le constat décisif est que tout ce qui précède a tourné sur des données
+**synthétiques** (marche aléatoire), incapables de contenir un edge réel. Cette
+section met en place — et pré-enregistre — la première validation sur données
+**réelles**, dès que des CSV réels seront fournis.
+
+### Source de données réelle (implémentée)
+
+`CsvHistoricalProvider` (`app/data/providers.py`), sélectionné par
+`settings.provider.name = "csv"` :
+
+- lit des CSV OHLCV réels depuis `data/real/` (passe par `validate_ohlcv`,
+  renseigne `attrs['provider']='csv'`, `attrs['spread_available']`,
+  `attrs['source_file']`, et le diagnostic `data_quality`) ;
+- **échoue bruyamment** (`DataProviderError`) si le dossier/fichier manque, si le
+  CSV est vide, si une colonne requise manque, si les timestamps sont
+  illisibles, ou s'il y a trop peu de barres propres ;
+- **aucun repli synthétique** : un problème de données ne peut jamais être pris
+  pour de la donnée valide (test :
+  `test_build_provider_csv_never_falls_back_to_synthetic`).
+
+**Schéma attendu** (détaillé dans `data/real/README.md`) : un CSV par
+`(symbole, timeframe)` nommé `<SYMBOLE_SANS_SLASH>_<TIMEFRAME>.csv`
+(ex. `EURUSD_H1.csv`, `EURUSD_M15.csv`, `EURUSD_M5.csv`), colonnes
+`timestamp` (UTC), `open, high, low, close, volume` (+ `spread` optionnel en
+unités de prix). Ingestion couverte par `tests/test_csv_historical_provider.py`
+(schéma valide, schéma cassé, fichier/dossier manquant, vide, timestamps
+illisibles, gaps, tri, filtre de dates, spread absent — 12 tests).
+
+> Alternative locale (documentée, non requise en cloud) : le chemin
+> `MetaTrader5Provider` (`--provider mt5`) en démo **read-only** sur Windows
+> fournit les mêmes barres avec spreads réels.
+
+### Coûts réalistes (Étape 3)
+
+Le backtester utilise déjà le **spread réel** par symbole quand il est présent
+dans les données (colonne `spread`, en unités de prix), avec repli sur le coût
+fixe en pips sinon, et conserve la règle conservatrice **SL-avant-TP**
+(`_simulate_trade`, cf. `docs/data_provider_quality.md`). Si les CSV fournis
+n'ont pas de colonne `spread`, documenter l'hypothèse de spread par symbole
+utilisée (ex. EUR/USD ≈ 0.6–1.0 pip, paires JPY ≈ 0.8–1.4 pip, crosses plus
+larges) avant de lancer.
+
+### Config pré-enregistrée (figée AVANT tout run réel — anti-overfit)
+
+| paramètre | valeur figée |
+| --- | --- |
+| provider | `csv` (données réelles, sans repli) |
+| style | `day_trading` (H1 / M15 / M5) |
+| univers | les symboles fournis dans `data/real/` |
+| fenêtres | in-sample **45 j**, out-of-sample **21 j**, step **14 j** |
+| grille de score (réglée IS seulement) | 0, 50, 55, 60, 65, 70, 75 |
+| `min_in_sample_trades` | 8 |
+| **N minimal OOS pré-enregistré** | **≥ 780 trades** |
+
+Justification du N : l'analyse de puissance (Partie C.3.1) donne, à un σ
+**réaliste ≈ 1 R** (attendu sur données réelles où SL/TP sont touchés, contre
+0.23 R sur le régime « tout time-exit » synthétique),
+`n ≈ (1.96+0.84)²·σ²/Δ²` ⇒ **≈ 780 trades** pour résoudre Δ = ±0.10 R
+(et ≈ 3 100 pour ±0.05 R), à α = 0.05 bilatéral, puissance 0.80. **Si le N OOS
+réel est inférieur au seuil, le verdict est NON-CONCLUANT (sous-puissant)** — pas
+de conclusion forcée. On ne regarde pas l'OOS pour choisir quoi que ce soit.
+
+### Statut actuel : **NON-CONCLUANT — aucune donnée réelle fournie**
+
+Au moment de l'écriture, `data/real/` ne contient **aucun CSV réel** (seulement
+le `README.md` de schéma). Conformément à la consigne (« si le dossier est vide
+ou non conforme, arrête-toi et dis exactement quel format fournir — ne fabrique
+rien »), **aucun run réel n'a été exécuté** et aucune donnée n'a été fabriquée.
+
+**Pour débloquer le premier verdict réel**, déposer dans `data/real/` les CSV au
+schéma ci-dessus — au minimum, pour `day_trading`, les fichiers `H1/M15/M5` par
+symbole, avec un historique couvrant l'échauffement (≥ 420 barres H1 avant la
+date de début) **plus** la période de walk-forward. Le run sera alors :
+
+```
+python scripts/walk_forward_report.py --provider csv --style day_trading \
+    --symbols EUR/USD GBP/USD ... --from-date <UTC> --to-date <UTC> \
+    --in-sample-days 45 --out-of-sample-days 21 --step-days 14
+python scripts/score_expectancy_calibration.py --provider csv --style day_trading \
+    --symbols EUR/USD GBP/USD ... --from-date <UTC> --to-date <UTC>
+```
+
+---
+
 ## Part A — Integrity audit (do the fixes actually hold?)
 
 The audit proves, code in hand, that the P1/P2 fixes are real and correct. Every
