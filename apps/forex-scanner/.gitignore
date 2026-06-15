@@ -12,3 +12,7 @@ reports/*.log
 secrets
 credentials
 reports/*.txt
+# Real market data is acquired locally and never committed (keep the schema README).
+data/real/*.csv
+data/raw_histdata/
+!data/real/README.md

@@ -125,8 +125,12 @@ le `README.md` de schéma). Conformément à la consigne (« si le dossier est v
 ou non conforme, arrête-toi et dis exactement quel format fournir — ne fabrique
 rien »), **aucun run réel n'a été exécuté** et aucune donnée n'a été fabriquée.
 
-**Pour débloquer le premier verdict réel**, déposer dans `data/real/` les CSV au
-schéma ci-dessus — au minimum, pour `day_trading`, les fichiers `H1/M15/M5` par
+**Pour débloquer le premier verdict réel**, générer les CSV **en local** avec
+`scripts/fetch_real_data.py` (source Dukascopy bid/ask → spread réel ; lib
+`dukascopy-python` vérifiée installable ; repli `--source histdata`), qui écrit
+directement `data/real/<SYMBOLE>_<TF>.csv` au schéma attendu (voir
+`data/real/README.md` pour les commandes exactes et le dimensionnement ≥ 780
+trades OOS). Au minimum, pour `day_trading`, les fichiers `H1/M15/M5` par
 symbole, avec un historique couvrant l'échauffement (≥ 420 barres H1 avant la
 date de début) **plus** la période de walk-forward. Le run sera alors :
 

@@ -15,8 +15,12 @@
 # Streamlit / local app state
 **/.streamlit/
 
-# Local databases and runtime state
-apps/forex-scanner/data/
+# Local databases and runtime state (keep the data/real schema README tracked)
+apps/forex-scanner/data/*
+!apps/forex-scanner/data/real
+apps/forex-scanner/data/real/*
+!apps/forex-scanner/data/real/README.md
+apps/forex-scanner/data/raw_histdata/
 **/data/*.db
 **/data/*.sqlite
 **/data/*.sqlite3
