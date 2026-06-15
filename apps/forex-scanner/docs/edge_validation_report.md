@@ -169,7 +169,10 @@ minimum pré-enregistré (≥ 780) et sous les 878 requis pour ±0.10 R.**
 **Calibration score→expectancy (OOS dédup)** : non monotone, Spearman = +0.144
 (faible), **tous les déciles ont un IC qui englobe zéro** ; composantes non
 séparantes signalées : `technical, execution, empirical`. Aucun pouvoir
-discriminant détectable à ce N.
+discriminant détectable à ce N. La CLI documentée
+`score_expectancy_calibration.py` (sur les 1 612 trades plein-période,
+`reports/real/score_expectancy_calibration.{json,txt}`) confirme : non monotone,
+Spearman = +0.121, déciles à IC englobant zéro, mêmes composantes signalées.
 
 **Verdict : NON-CONCLUANT — sous-puissant.** Sur 1 paire × 17 mois, l'expectancy
 **brute ET nette** ne sont pas distinguables de zéro (IC incluent zéro), et
