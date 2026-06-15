@@ -1,7 +1,9 @@
 # Edge validation report
 
 Status: **integrity audited (Part A: OK)**; evidence produced on the only data
-available in this environment (Part B); honest interpretation (Part C).
+available (Part B); decomposition, power, and verdict (Part C). **Final verdict:
+edge NON-CONCLUSIVE — data-limited** (real FX data unavailable; synthetic data is a
+random walk that cannot validate a real edge; pre-registered power not reached).
 
 > Paper/demo only. No live trading, no `order_send`, no broker execution. This
 > document does not constitute a performance guarantee or trading advice.
@@ -299,8 +301,112 @@ USD/JPY, USD/CHF, AUD/USD, USD/CAD, NZD/USD, EUR/JPY, GBP/JPY, EUR/GBP, EUR/CHF,
 AUD/JPY), day_trading, 2025-11-01→2026-06-01 (7 months), windows 45/21/14, gate
 35, **pre-registered minimum ≥ 300 OOS trades**.
 
-<!-- EXTENDED_RESULTS -->
+**Executed run (with a transparency note on deviation).** Because of sandbox
+compute limits and a mid-run container restart, the run actually executed was a
+**reduced** variant: 12 symbols (as above), **2026-02-01 → 2026-06-01 (4 months)**,
+windows **35/21/14**, 5 folds. This deviates from the original pre-registration
+(7 months, 45/21/14) and — critically — **did not reach the pre-registered ≥ 300
+OOS minimum**: it produced 382 full-period trades but only **65 OOS trades** (4 of
+the 12 symbols generated *zero* trades). The extended attempt is therefore **also
+underpowered** and is reported as such, not as confirmation.
+
+| metric | canonical (5 sym, 3.5 mo) | extended (12 sym, 4 mo) |
+| --- | --- | --- |
+| full-period trades | 282 | 382 |
+| OOS trades | 65 | 65 (target ≥300 **not met**) |
+| **gross** expectancy | +0.0285 [−0.027, +0.085] | **+0.1396 [+0.002, +0.287]** |
+| **net** expectancy | **−0.1191 [−0.174, −0.064]** | **+0.0604 [−0.080, +0.212]** |
+| avg cost / trade | 0.148 R | 0.079 R |
+| net σ | 0.235 | 0.612 |
+| Spearman(score, R) | −0.071 | +0.267 |
+| profit factor | 0.30 | 1.29 |
+
+**This table is the key result.** Every headline number **changed sign or swung
+wildly** between two arbitrary synthetic configurations: net expectancy went from
+significantly **negative** to **positive-but-CI-includes-zero**; gross from ≈0 to
+marginally positive; the score↔outcome Spearman from −0.07 to +0.27. Per-cell
+figures are pure noise — e.g. GBP/JPY net **+1.21 on n=2**, EUR/JPY +0.44 on n=6,
+breakout_candidate +0.47 on n=10, while GBP/USD is −0.28 on n=17. None of this is
+stable, and **neither run reached adequate statistical power**.
+
+The instability is the signal: on a structureless (random-walk-plus-artificial-
+drift) series, outcomes are dominated by *which seeds/symbols/dates* are included,
+not by any repeatable edge.
+
 
 ### C.4 — Honest decision (brief Part D)
 
-<!-- FINAL_VERDICT -->
+**Verdict: (iii) DATA-LIMITED — non-conclusive. The rules-based edge is neither
+demonstrated nor refuted, because no data capable of settling it was available.**
+
+Reasoning, strictly from the numbers above:
+
+1. **The only data is uninformative by construction.** The synthetic feed is a
+   random walk plus an *artificial* per-symbol drift. On it, theory says gross ≈ 0
+   and net < 0 (cost). Any positive "edge" merely captures the generator's
+   drift — an artifact, not real predictability. So no synthetic result, positive
+   or negative, can validate a real edge.
+2. **The results are not robust.** Across two arbitrary configurations every
+   headline metric flipped or swung (net −0.119 → +0.060; gross +0.029 → +0.140;
+   Spearman −0.07 → +0.27), with per-cell values dominated by 2–10-trade noise.
+   This is the fingerprint of *no stable signal*.
+3. **Power was never reached.** The pre-registered ≥ 300 OOS minimum was not met
+   (65 in both runs); 4/12 symbols produced zero trades. At the artificially low
+   synthetic σ, ±0.05 R needs ~173 trades; at a realistic σ ≈ 1 R it needs
+   **~3,100** (±0.05 R) or **~780** (±0.10 R). We are 1–2 orders of magnitude short.
+4. **Real FX data is blocked** (Yahoo allowlist 403; no MT5). The real test never ran.
+
+Why not the other verdicts:
+
+- **Not (i) “no edge — abandon.”** We cannot declare the hypothesis unsupported
+  without ever testing it on data that *could* contain an edge. Claiming (i) here
+  would be a category error.
+- **Not (ii) “cost-limited” as a conclusion.** The canonical decomposition is
+  *consistent* with cost-limitation (gross ≈ 0, net = gross − cost ≈ −0.15 R, all
+  time-exits), but the extended run’s gross was not robustly positive, so we
+  cannot assert a real gross edge destroyed by costs. (ii) is a **hypothesis to
+  test on real data**, not a finding.
+
+**What would settle it (pre-conditions for any real verdict):**
+
+1. **Real data**: demo/broker bars with realistic per-symbol spreads — local MT5
+   on Windows, or add an allowlisted historical FX vendor behind the existing
+   pluggable `MarketDataProvider` (no engine change needed).
+2. **Adequate, pre-registered sample**: size N from the power analysis (≈780
+   trades to resolve ±0.10 R, ≈3,100 for ±0.05 R at σ≈1 R), fixed before looking.
+3. **Run unchanged through the now-audited harness** (Part A guarantees no
+   look-ahead, no OOS leakage, honest costs/metrics).
+4. **One falsifiable selectivity hypothesis to test there (not applied now, to
+   avoid p-hacking):** since cost-in-R = spread / planned-risk and the canonical
+   run’s loss was ~0.15 R of pure cost on all-time-exit trades, require
+   `planned_risk_distance ≥ k · spread` (e.g. reject when spread exceeds ~8 % of
+   planned risk). Validate strictly OOS; keep or discard by its OOS expectancy CI.
+
+**Bottom line.** The *machinery* is now trustworthy (Part A) and behaves exactly
+as theory demands on a structureless series (Part C.1). But in this environment we
+**cannot** make an edge claim about real FX markets in either direction. The
+honest scientific output of this work is a **validated, leak-free evaluation
+harness and a clear, pre-registered protocol** — not a profitable system, and not
+a false declaration of edge.
+
+---
+
+## Summary of code changes, tests, and safety
+
+- **Code changed this phase:** the only production change is the walk-forward
+  train/test boundary hardening (`run_walk_forward` ends the in-sample segment 1 µs
+  before the boundary so train/test ranges are disjoint by construction) plus its
+  regression test — committed in `9cf81aa`. All other artifacts are **documentation
+  and throwaway analysis scripts** (`/tmp`, not committed). No engine, scoring,
+  risk, safety, or provider logic was altered for the experiments (the score-gate
+  change used to widen the analysis sample was an in-memory `settings` override in a
+  scratch script, never persisted).
+- **Tests:** `python -m pytest` — see the run recorded alongside this commit;
+  the audited modules (`test_walk_forward`, `test_backtest_activation`,
+  `test_backtest_metrics`, `test_score_expectancy_calibration`, `test_indicators`)
+  are green.
+- **Safety guardrails: none weakened.** Still paper/demo only —
+  `EXECUTION_MODE=paper`, `ALLOW_LIVE_TRADING=false`, autonomous policy,
+  `ensure_demo_bot_safe_mode`, and the readiness gate are untouched; no `order_send`
+  or broker-live path was added; scan/backtest parity is preserved.
+
