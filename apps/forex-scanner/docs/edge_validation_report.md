@@ -1,12 +1,56 @@
 # Edge validation report
 
-Status: **integrity audited (Part A: OK)**; evidence produced on the only data
-available (Part B); decomposition, power, and verdict (Part C). **Final verdict:
-edge NON-CONCLUSIVE — data-limited** (real FX data unavailable; synthetic data is a
-random walk that cannot validate a real edge; pre-registered power not reached).
+Status: **integrity audited (Part A: OK)**; evidence on the only data available
+(Part B); decomposition, power, verdict (Part C); **decisive gross-signal test and
+action verdict (Part D).**
 
 > Paper/demo only. No live trading, no `order_send`, no broker execution. This
 > document does not constitute a performance guarantee or trading advice.
+
+---
+
+## DÉCISION — **NO-GO sur l'approche actuelle**
+
+**Question décisive : existe-t-il un signal BRUT exploitable ?** → **Non.**
+
+Test de signal sur le walk-forward existant (run canonique, le run à −0.1191 R,
+n = 65 trades OOS) :
+
+| | expectancy | IC bootstrap 95 % | significatif ? |
+| --- | --- | --- | --- |
+| **Brut** (hors coûts) | **+0.0285 R** | **[−0.0274, +0.0851]** | **non — IC inclut zéro** |
+| Net (après coûts) | −0.1191 R | [−0.1742, −0.0639] | oui (négatif) |
+| Coût moyen / trade | 0.1476 R | [0.1379, 0.1575] | — |
+
+**L'expectancy brute n'est pas positive avec un IC excluant zéro** → cas
+« brut ≈ 0 » → **pas de signal exploitable dans les features/données actuelles**.
+
+> Pourquoi on ne retient PAS le run étendu (réduit) où le brut valait +0.1396
+> [+0.0022, +0.2866] : ce run était sous-puissant (65 OOS au lieu des ≥300
+> pré-enregistrés), a dévié de la pré-enregistration, **contredit** le run
+> canonique (instabilité de signe), et sur une marche aléatoire tout « brut »
+> positif ne capte que la **dérive artificielle du générateur**. Choisir ce
+> chiffre favorable serait du p-hacking — explicitement interdit ici.
+
+**Levier le plus susceptible de changer le résultat (descriptif, non implémenté) :
+la QUALITÉ / DISPONIBILITÉ DES DONNÉES — pas de nouvelles features ni d'autres
+instruments.** Justification : la seule donnée accessible ici est une marche
+aléatoire synthétique (yfinance bloqué par l'allowlist, pas de MT5). Par
+construction elle ne contient **aucune** structure prédictible ; donc de
+nouvelles familles de features ou d'autres classes d'instruments **testées sur
+cette même donnée** rendraient encore un brut ≈ 0. Tant qu'on ne dispose pas de
+**données de marché réelles** (bars demo/broker avec spreads réalistes — MT5
+local, ou un fournisseur historique mis en allowlist derrière l'interface
+`MarketDataProvider` déjà pluggable), aucune hypothèse de signal n'est testable.
+C'est le préalable n°1 ; ce n'est qu'ensuite que la question des features
+devient décidable.
+
+**Verdict d'action : NO-GO** sur la stratégie rules-based en l'état + le pipeline
+de données actuel. Cela ne « réfute » pas l'hypothèse sur les marchés réels (on
+ne l'a jamais testée sur une donnée pouvant contenir un edge) : cela signifie
+qu'**aucun GO n'est justifié** — ne pas déployer ni passer en forward paper comme
+si un edge était démontré. Le détail (intégrité, brut/net, puissance, instabilité)
+est en Parties A–C ci-dessous.
 
 ---
 
