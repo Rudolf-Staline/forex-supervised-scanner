@@ -1,8 +1,11 @@
 # Edge validation report
 
-Status: **integrity audited (Part A: OK)**; evidence on the only data available
-(Part B); decomposition, power, verdict (Part C); **decisive gross-signal test and
-action verdict (Part D).**
+Status: **integrity audited (Part A: OK)**; synthetic evidence + decomposition,
+power, verdict (Parts B–D); **first REAL-data run (Dukascopy EUR/USD, real
+spread) — verdict NON-CONCLUSIVE / underpowered** (gross & net OOS expectancy
+CIs both include zero; 677 unique OOS trades < pre-registered 780). See the
+"VALIDATION SUR DONNÉES RÉELLES" section. The validated chain now runs
+end-to-end on real data with realistic spreads and SL/TP dynamics.
 
 > Paper/demo only. No live trading, no `order_send`, no broker execution. This
 > document does not constitute a performance guarantee or trading advice.
@@ -54,7 +57,7 @@ est en Parties A–C ci-dessous.
 
 ---
 
-## VALIDATION SUR DONNÉES RÉELLES (statut : EN ATTENTE DE DONNÉES)
+## VALIDATION SUR DONNÉES RÉELLES (premier verdict : NON-CONCLUANT, sous-puissant)
 
 Le constat décisif est que tout ce qui précède a tourné sur des données
 **synthétiques** (marche aléatoire), incapables de contenir un edge réel. Cette
@@ -118,29 +121,75 @@ Justification du N : l'analyse de puissance (Partie C.3.1) donne, à un σ
 réel est inférieur au seuil, le verdict est NON-CONCLUANT (sous-puissant)** — pas
 de conclusion forcée. On ne regarde pas l'OOS pour choisir quoi que ce soit.
 
-### Statut actuel : **NON-CONCLUANT — aucune donnée réelle fournie**
+### PREMIER VERDICT RÉEL : **NON-CONCLUANT (sous-puissant)**
 
-Au moment de l'écriture, `data/real/` ne contient **aucun CSV réel** (seulement
-le `README.md` de schéma). Conformément à la consigne (« si le dossier est vide
-ou non conforme, arrête-toi et dis exactement quel format fournir — ne fabrique
-rien »), **aucun run réel n'a été exécuté** et aucune donnée n'a été fabriquée.
+Données réelles **Dukascopy EUR/USD** (spread bid/ask réel), acquises en local
+via `scripts/fetch_real_data.py` et committées dans `data/real/` :
+`EURUSD_H1.csv` (8 841 barres), `M15` (35 363), `M5` (106 043), couverture
+**2023-01-01 → 2024-05-31** (~17 mois). Spread réel moyen ≈ 0.5 pip
+(`mean ≈ 0.000049`). Config **conforme à la pré-enregistration** ci-dessus
+(45/21/14, grille 0–75, `min_in_sample_trades=8`, gate moteur par défaut).
 
-**Pour débloquer le premier verdict réel**, générer les CSV **en local** avec
-`scripts/fetch_real_data.py` (source Dukascopy bid/ask → spread réel ; lib
-`dukascopy-python` vérifiée installable ; repli `--source histdata`), qui écrit
-directement `data/real/<SYMBOLE>_<TF>.csv` au schéma attendu (voir
-`data/real/README.md` pour les commandes exactes et le dimensionnement ≥ 780
-trades OOS). Au minimum, pour `day_trading`, les fichiers `H1/M15/M5` par
-symbole, avec un historique couvrant l'échauffement (≥ 420 barres H1 avant la
-date de début) **plus** la période de walk-forward. Le run sera alors :
+Commandes exécutées (chaîne documentée, `--provider csv`) :
 
 ```
-python scripts/walk_forward_report.py --provider csv --style day_trading \
-    --symbols EUR/USD GBP/USD ... --from-date <UTC> --to-date <UTC> \
-    --in-sample-days 45 --out-of-sample-days 21 --step-days 14
-python scripts/score_expectancy_calibration.py --provider csv --style day_trading \
-    --symbols EUR/USD GBP/USD ... --from-date <UTC> --to-date <UTC>
+python scripts/walk_forward_report.py --provider csv --symbols EUR/USD \
+    --from-date 2023-01-01 --to-date 2024-05-31 \
+    --in-sample-days 45 --out-of-sample-days 21 --step-days 14 \
+    --score-grid 0,50,55,60,65,70,75 --min-in-sample-trades 8 --output-dir reports/real
+python scripts/score_expectancy_calibration.py --provider csv --symbols EUR/USD \
+    --from-date 2023-01-01 --to-date 2024-05-31 --output-dir reports/real
 ```
+
+**Walk-forward documenté** (`reports/real/walk_forward.{json,txt}`) : 33 folds,
+agrégat OOS **1 069 trades**, expectancy nette **−0.0046 R**, win 44.5 %,
+profit factor 0.99, max drawdown 46.7 R.
+
+**Décomposition brut/net (OOS dédupliqué — voir note overlap).** Comme `step` (14)
+< `oos` (21), les fenêtres OOS se chevauchent de 7 j ; on déduplique chaque trade
+(assigné au premier fold qui le couvre) pour un compte honnête :
+
+| grandeur | OOS dédupliqué (n = 677) | IC bootstrap 95 % | significatif ? |
+| --- | --- | --- | --- |
+| **brut** (hors coûts) | **−0.011 R** | **[−0.088, +0.067]** | non — IC inclut zéro |
+| **net** (après coûts réels) | **−0.032 R** | **[−0.110, +0.046]** | non — IC inclut zéro |
+| coût moyen / trade | 0.021 R | [0.020, 0.023] | — (spread réel ≈ 0.5 pip) |
+| σ(net) | 1.06 | — | régime réaliste |
+| win rate / profit factor | 43.3 % / 0.94 | — | — |
+
+Sorties (dédup) : **stop_loss 304, take_profit 176, time_exit 197** — un mélange
+SL/TP **réaliste** (vs « 100 % time-exit » du synthétique), preuve que la chaîne
+mord sur de vraies dynamiques de prix. Plein-période : 1 612 trades.
+
+**Puissance.** À σ(net) = 1.06 (réaliste, car SL/TP réellement touchés), il faut
+≈ **878** trades OOS pour résoudre Δ = ±0.10 R (≈ 3 511 pour ±0.05 ; ≈ 391 pour
+±0.15), à α = 0.05, puissance 0.80. **Le N OOS dédupliqué (677) est sous le
+minimum pré-enregistré (≥ 780) et sous les 878 requis pour ±0.10 R.**
+
+**Calibration score→expectancy (OOS dédup)** : non monotone, Spearman = +0.144
+(faible), **tous les déciles ont un IC qui englobe zéro** ; composantes non
+séparantes signalées : `technical, execution, empirical`. Aucun pouvoir
+discriminant détectable à ce N.
+
+**Verdict : NON-CONCLUANT — sous-puissant.** Sur 1 paire × 17 mois, l'expectancy
+**brute ET nette** ne sont pas distinguables de zéro (IC incluent zéro), et
+l'échantillon (677 OOS uniques) est sous le seuil pré-enregistré. On **ne peut
+pas** trancher GO-CONDITIONNEL vs NO-GO. Ce n'est **pas** un NO-GO : c'est un
+manque de puissance. Ce passage atteint son objectif : **la chaîne tourne de bout
+en bout sur de vraies données**, avec spreads réels (coût 0.021 R/trade) et
+dynamiques SL/TP réalistes (σ ≈ 1 R), via le provider `csv` sans repli synthétique.
+
+> Note méthodo : l'agrégat documenté (1 069) et le dédupliqué (677) diffèrent car
+> (a) le chevauchement de 7 j double-compte dans l'agrégat brut, et (b) la
+> décomposition brut/net réutilise un unique backtest plein-période découpé par
+> date (équivalent post-correctif causal, au cooldown `blocked_until` continu
+> près), le script documenté relançant le moteur par segment. Les deux concluent
+> identiquement : net ≈ 0, IC incluant zéro, sous-puissant.
+
+**Pour trancher (prochaine étape)** : étendre l'univers (plusieurs paires) et
+l'historique (plusieurs années) pour dépasser **≥ 878–3 500 trades OOS** selon Δ
+visé — l'acquisition locale `fetch_real_data.py` est prête pour ça. Ne pas forcer
+de conclusion sous le seuil.
 
 ---
 
