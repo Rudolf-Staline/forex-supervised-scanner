@@ -95,15 +95,44 @@ def build_report(
         }
     )
 
-    buckets = _build_buckets(frame, n_buckets, bootstrap_resamples, confidence, seed)
+    return build_report_from_frame(
+        frame,
+        n_buckets=n_buckets,
+        bootstrap_resamples=bootstrap_resamples,
+        confidence=confidence,
+        seed=seed,
+        total_trades=len(trades),
+    )
+
+
+def build_report_from_frame(
+    frame: pd.DataFrame,
+    *,
+    n_buckets: int = 10,
+    bootstrap_resamples: int = 2000,
+    confidence: float = 0.95,
+    seed: int = 1729,
+    total_trades: int | None = None,
+) -> ScoreExpectancyReport:
+    """Build the calibration report from a frame with ``final_score`` and ``net_r``.
+
+    Used both by :func:`build_report` (from TradeRecords) and by registry-based
+    consumers. Component columns (``technical_score`` …) are optional; absent
+    components are simply not evaluated.
+    """
+
+    scored = frame.dropna(subset=["final_score"]).copy() if "final_score" in frame else frame.iloc[0:0].copy()
+    if "is_win" not in scored.columns and "net_r" in scored.columns:
+        scored["is_win"] = (scored["net_r"] > 0.0).astype(float)
+    buckets = _build_buckets(scored, n_buckets, bootstrap_resamples, confidence, seed)
     monotonic = _is_non_decreasing([bucket.expectancy for bucket in buckets])
-    spearman_score = _spearman(frame.get("final_score"), frame.get("net_r"))
-    components = _component_separation(frame)
+    spearman_score = _spearman(scored.get("final_score"), scored.get("net_r"))
+    components = _component_separation(scored)
     flagged = [component.component for component in components if not component.separates]
 
     return ScoreExpectancyReport(
-        trade_count=len(trades),
-        scored_trades=len(scored),
+        trade_count=total_trades if total_trades is not None else int(len(scored)),
+        scored_trades=int(len(scored)),
         requested_buckets=n_buckets,
         buckets=buckets,
         monotonic_non_decreasing=monotonic,
@@ -111,6 +140,36 @@ def build_report(
         components=components,
         flagged_components=flagged,
     )
+
+
+def spearman_ci(
+    x: pd.Series,
+    y: pd.Series,
+    *,
+    resamples: int = 2000,
+    confidence: float = 0.95,
+    seed: int = 1729,
+) -> tuple[float, float, float]:
+    """Spearman rank correlation with a percentile-bootstrap CI.
+
+    Returns ``(rho, ci_low, ci_high)``. Resamples paired observations with
+    replacement. Returns zeros if there are too few/degenerate points.
+    """
+
+    paired = pd.DataFrame({"x": x, "y": y}).dropna().reset_index(drop=True)
+    rho = _spearman(paired.get("x"), paired.get("y"))
+    if len(paired) < 5:
+        return rho, 0.0, 0.0
+    rng = np.random.default_rng(seed)
+    n = len(paired)
+    xv = paired["x"].to_numpy()
+    yv = paired["y"].to_numpy()
+    estimates: list[float] = []
+    for _ in range(resamples):
+        idx = rng.integers(0, n, size=n)
+        estimates.append(_spearman(pd.Series(xv[idx]), pd.Series(yv[idx])))
+    alpha = (1.0 - confidence) / 2.0
+    return rho, round(float(np.quantile(estimates, alpha)), 4), round(float(np.quantile(estimates, 1.0 - alpha)), 4)
 
 
 def bootstrap_ci(

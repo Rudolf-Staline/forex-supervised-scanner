@@ -34,6 +34,8 @@ The project remains **paper/demo only**:
 | [`local_mt5_realtime_validation.md`](local_mt5_realtime_validation.md) | Local Windows/MT5 read-only market-data validation path. |
 | [`local_paper_operation_runbook.md`](local_paper_operation_runbook.md) | Human operator procedure for safe paper/demo workflow execution and report interpretation. |
 | [`data_provider_quality.md`](data_provider_quality.md) | yfinance FX data-quality limits and the pluggable `MarketDataProvider` interface. |
+| [`real_validation_runbook.md`](real_validation_runbook.md) | Local/Codespace runbook: fetch real bars → walk-forward registry → edge decomposition, then push reports only. |
+| [`edge_validation_report.md`](edge_validation_report.md) | Edge validation: integrity audit, synthetic + real-data verdicts, pre-registered decision rule. |
 
 ## Autonomous paper/demo stack
 

@@ -106,6 +106,7 @@ def main() -> None:
     print(report_to_text(report))
     print(f"json_export={outputs['json']}")
     print(f"txt_export={outputs['txt']}")
+    print(f"registry_export={outputs['registry']}")
 
 
 def _parse_setup_filter(value: str) -> SetupFamily | str:
