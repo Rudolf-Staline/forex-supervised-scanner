@@ -1,0 +1,333 @@
+{
+  "avg_cost_r": 0.0414,
+  "block_size": 20,
+  "calibration": {
+    "buckets": [
+      {
+        "ci": [
+          -0.1409,
+          -0.0066
+        ],
+        "expectancy": -0.0752,
+        "label": "D1",
+        "n": 1082,
+        "score_max": 64.15,
+        "score_min": 55.03,
+        "win_rate": 42.98
+      },
+      {
+        "ci": [
+          -0.1343,
+          -0.0066
+        ],
+        "expectancy": -0.071,
+        "label": "D2",
+        "n": 1082,
+        "score_max": 66.51,
+        "score_min": 64.15,
+        "win_rate": 41.77
+      },
+      {
+        "ci": [
+          -0.1291,
+          -0.0015
+        ],
+        "expectancy": -0.0654,
+        "label": "D3",
+        "n": 1082,
+        "score_max": 68.49,
+        "score_min": 66.51,
+        "win_rate": 41.68
+      },
+      {
+        "ci": [
+          -0.1135,
+          0.0172
+        ],
+        "expectancy": -0.049,
+        "label": "D4",
+        "n": 1081,
+        "score_max": 70.3,
+        "score_min": 68.5,
+        "win_rate": 43.2
+      },
+      {
+        "ci": [
+          -0.0659,
+          0.0588
+        ],
+        "expectancy": -0.004,
+        "label": "D5",
+        "n": 1082,
+        "score_max": 71.33,
+        "score_min": 70.3,
+        "win_rate": 44.45
+      },
+      {
+        "ci": [
+          -0.1428,
+          -0.0188
+        ],
+        "expectancy": -0.0816,
+        "label": "D6",
+        "n": 1082,
+        "score_max": 72.47,
+        "score_min": 71.33,
+        "win_rate": 41.22
+      },
+      {
+        "ci": [
+          -0.0776,
+          0.0461
+        ],
+        "expectancy": -0.0158,
+        "label": "D7",
+        "n": 1081,
+        "score_max": 73.8,
+        "score_min": 72.47,
+        "win_rate": 44.13
+      },
+      {
+        "ci": [
+          -0.08,
+          0.0367
+        ],
+        "expectancy": -0.0206,
+        "label": "D8",
+        "n": 1082,
+        "score_max": 75.32,
+        "score_min": 73.81,
+        "win_rate": 46.21
+      },
+      {
+        "ci": [
+          -0.0534,
+          0.0649
+        ],
+        "expectancy": 0.0053,
+        "label": "D9",
+        "n": 1082,
+        "score_max": 76.75,
+        "score_min": 75.32,
+        "win_rate": 45.01
+      },
+      {
+        "ci": [
+          -0.051,
+          0.0649
+        ],
+        "expectancy": 0.0065,
+        "label": "D10",
+        "n": 1081,
+        "score_max": 84.82,
+        "score_min": 76.75,
+        "win_rate": 45.33
+      }
+    ],
+    "flagged_components": [],
+    "monotonic_non_decreasing": false,
+    "per_pair_spearman": {
+      "AUD/USD": {
+        "ci": [
+          0.1623,
+          0.2705
+        ],
+        "n": 1301,
+        "spearman": 0.2183
+      },
+      "EUR/USD": {
+        "ci": [
+          0.1352,
+          0.2134
+        ],
+        "n": 2542,
+        "spearman": 0.175
+      },
+      "GBP/USD": {
+        "ci": [
+          0.1134,
+          0.2017
+        ],
+        "n": 1912,
+        "spearman": 0.1584
+      },
+      "USD/CAD": {
+        "ci": [
+          0.0868,
+          0.1943
+        ],
+        "n": 1375,
+        "spearman": 0.1416
+      },
+      "USD/CHF": {
+        "ci": [
+          0.078,
+          0.1975
+        ],
+        "n": 1208,
+        "spearman": 0.1376
+      },
+      "USD/JPY": {
+        "ci": [
+          0.1265,
+          0.2046
+        ],
+        "n": 2479,
+        "spearman": 0.1661
+      }
+    },
+    "spearman": 0.1792,
+    "spearman_ci": [
+      0.1603,
+      0.1985
+    ]
+  },
+  "effective_sample_size": {
+    "avg_concurrent_pairs_per_day": 3.6726,
+    "design_effect": 1.3981,
+    "effective_n": 7737,
+    "mean_pairwise_daily_corr": 0.1489,
+    "n_pairs": 6,
+    "raw_n": 10817
+  },
+  "exit_reasons": {
+    "stop_loss": 4636,
+    "take_profit": 2771,
+    "time_exit": 3410
+  },
+  "gross_ci_iid": [
+    -0.0154,
+    0.0244
+  ],
+  "gross_expectancy": 0.0043,
+  "n_oos_trades": 10817,
+  "net_ci_block_bootstrap": [
+    -0.063,
+    -0.0122
+  ],
+  "net_ci_cluster_by_pair": [
+    -0.0739,
+    -0.0101
+  ],
+  "net_ci_grouped_conservative": [
+    -0.0739,
+    -0.0101
+  ],
+  "net_ci_iid": [
+    -0.0568,
+    -0.0172
+  ],
+  "net_expectancy": -0.0371,
+  "net_std": 1.0442,
+  "pairs": [
+    "AUD/USD",
+    "EUR/USD",
+    "GBP/USD",
+    "USD/CAD",
+    "USD/CHF",
+    "USD/JPY"
+  ],
+  "per_pair": [
+    {
+      "gross_exp": -0.0558,
+      "n": 1301,
+      "net_ci": [
+        -0.174,
+        -0.0636
+      ],
+      "net_exp": -0.1193,
+      "pair": "AUD/USD",
+      "profit_factor": 0.7706,
+      "win_rate": 40.66
+    },
+    {
+      "gross_exp": -0.0036,
+      "n": 2542,
+      "net_ci": [
+        -0.0689,
+        0.0143
+      ],
+      "net_exp": -0.0276,
+      "pair": "EUR/USD",
+      "profit_factor": 0.9446,
+      "win_rate": 43.51
+    },
+    {
+      "gross_exp": 0.016,
+      "n": 1912,
+      "net_ci": [
+        -0.0712,
+        0.0219
+      ],
+      "net_exp": -0.0258,
+      "pair": "GBP/USD",
+      "profit_factor": 0.9468,
+      "win_rate": 44.14
+    },
+    {
+      "gross_exp": -0.0241,
+      "n": 1375,
+      "net_ci": [
+        -0.1404,
+        -0.0305
+      ],
+      "net_exp": -0.0845,
+      "pair": "USD/CAD",
+      "profit_factor": 0.8357,
+      "win_rate": 42.04
+    },
+    {
+      "gross_exp": 0.0343,
+      "n": 1208,
+      "net_ci": [
+        -0.0862,
+        0.0289
+      ],
+      "net_exp": -0.0281,
+      "pair": "USD/CHF",
+      "profit_factor": 0.9401,
+      "win_rate": 45.7
+    },
+    {
+      "gross_exp": 0.0362,
+      "n": 2479,
+      "net_ci": [
+        -0.0333,
+        0.0518
+      ],
+      "net_exp": 0.0095,
+      "pair": "USD/JPY",
+      "profit_factor": 1.0197,
+      "win_rate": 44.66
+    }
+  ],
+  "period": [
+    "2019-02-15T07:30:00+00:00",
+    "2023-12-21T23:00:00+00:00"
+  ],
+  "profit_factor": 0.9249,
+  "robustness_halves": {
+    "both_halves_net_positive": false,
+    "first_half": {
+      "end": "2022-03-08T09:00:00+00:00",
+      "n": 5408,
+      "net_ci": [
+        -0.05,
+        0.0069
+      ],
+      "net_exp": -0.0214,
+      "start": "2019-02-15T07:30:00+00:00"
+    },
+    "second_half": {
+      "end": "2023-12-21T23:00:00+00:00",
+      "n": 5409,
+      "net_ci": [
+        -0.0805,
+        -0.0258
+      ],
+      "net_exp": -0.0528,
+      "start": "2022-03-08T09:15:00+00:00"
+    }
+  },
+  "win_rate": 43.6
+}

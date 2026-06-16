@@ -1,0 +1,30 @@
+Edge decomposition (OOS registry — paper-only)
+==============================================
+pairs           : AUD/USD, EUR/USD, GBP/USD, USD/CAD, USD/CHF, USD/JPY
+period          : 2019-02-15T07:30:00+00:00 -> 2023-12-21T23:00:00+00:00
+OOS trades (raw): 10817
+effective N     : 7737 (DEFF=1.3981, rho_bar=0.1489)
+
+gross expectancy: +0.0043 R  CI(iid) [-0.0154, 0.0244]
+net expectancy  : -0.0371 R  CI(iid) [-0.0568, -0.0172]
+  cluster-by-pair CI : [-0.0739, -0.0101]
+  block-bootstrap CI : [-0.063, -0.0122]
+  GROUPED (governs)  : [-0.0739, -0.0101]
+cost/trade      : 0.0414 R   net_std=1.0442
+win/PF          : 43.60% / 0.9249
+exit reasons    : {'stop_loss': 4636, 'time_exit': 3410, 'take_profit': 2771}
+
+Per-pair net expectancy:
+  AUD/USD    n=1301  net=-0.1193 CI=[-0.174, -0.0636] win=40.7% PF=0.7706
+  EUR/USD    n=2542  net=-0.0276 CI=[-0.0689, 0.0143] win=43.5% PF=0.9446
+  GBP/USD    n=1912  net=-0.0258 CI=[-0.0712, 0.0219] win=44.1% PF=0.9468
+  USD/CAD    n=1375  net=-0.0845 CI=[-0.1404, -0.0305] win=42.0% PF=0.8357
+  USD/CHF    n=1208  net=-0.0281 CI=[-0.0862, 0.0289] win=45.7% PF=0.9401
+  USD/JPY    n=2479  net=+0.0095 CI=[-0.0333, 0.0518] win=44.7% PF=1.0197
+
+Robustness (halves):
+  first : n=5408 net=-0.0214 CI=[-0.05, 0.0069]
+  second: n=5409 net=-0.0528 CI=[-0.0805, -0.0258]
+  both halves net positive: False
+
+Calibration: monotonic=False spearman=0.1792 CI=[0.1603, 0.1985] flagged=[]

@@ -1,0 +1,144 @@
+Walk-Forward / Out-of-Sample Report (paper-only)
+================================================
+symbols           : EUR/USD, GBP/USD, USD/JPY, USD/CHF, AUD/USD, USD/CAD
+style             : day_trading
+setup_filter      : all
+range             : 2019-01-01 -> 2024-01-01
+windows           : in_sample=45d oos=21d step=14d
+score_grid        : 0, 50, 55, 60, 65, 70, 75
+folds             : 126
+
+Aggregated OUT-OF-SAMPLE performance (thresholds tuned in-sample only):
+  trades          : 13953
+  expectancy/trade: -0.0423 R
+  win_rate        : 43.40%
+  profit_factor   : 0.9142
+  max_drawdown    : 625.8561 R
+
+Per-fold breakdown:
+  fold 0: IS[2019-01-01->2019-02-15] OOS[2019-02-15->2019-03-08] min_score=75 IS_exp=0.1406R(n=42) OOS_exp=-0.0280R(n=23) OOS_win=47.83%
+  fold 1: IS[2019-01-15->2019-03-01] OOS[2019-03-01->2019-03-22] min_score=75 IS_exp=0.1429R(n=56) OOS_exp=-0.4541R(n=20) OOS_win=30.00%
+  fold 2: IS[2019-01-29->2019-03-15] OOS[2019-03-15->2019-04-05] min_score=65 IS_exp=0.0194R(n=477) OOS_exp=-0.0865R(n=216) OOS_win=42.59%
+  fold 3: IS[2019-02-12->2019-03-29] OOS[2019-03-29->2019-04-19] min_score=65 IS_exp=-0.0380R(n=488) OOS_exp=-0.1675R(n=176) OOS_win=39.77%
+  fold 4: IS[2019-02-26->2019-04-12] OOS[2019-04-12->2019-05-03] min_score=65 IS_exp=-0.0989R(n=469) OOS_exp=0.0899R(n=151) OOS_win=45.03%
+  fold 5: IS[2019-03-12->2019-04-26] OOS[2019-04-26->2019-05-17] min_score=65 IS_exp=-0.0534R(n=410) OOS_exp=-0.0271R(n=188) OOS_win=45.21%
+  fold 6: IS[2019-03-26->2019-05-10] OOS[2019-05-10->2019-05-31] min_score=75 IS_exp=0.0737R(n=38) OOS_exp=0.1883R(n=26) OOS_win=53.85%
+  fold 7: IS[2019-04-09->2019-05-24] OOS[2019-05-24->2019-06-14] min_score=75 IS_exp=0.2311R(n=44) OOS_exp=0.0586R(n=25) OOS_win=44.00%
+  fold 8: IS[2019-04-23->2019-06-07] OOS[2019-06-07->2019-06-28] min_score=75 IS_exp=0.3497R(n=53) OOS_exp=-0.2598R(n=28) OOS_win=32.14%
+  fold 9: IS[2019-05-07->2019-06-21] OOS[2019-06-21->2019-07-12] min_score=75 IS_exp=0.1124R(n=54) OOS_exp=-0.4093R(n=33) OOS_win=27.27%
+  fold 10: IS[2019-05-21->2019-07-05] OOS[2019-07-05->2019-07-26] min_score=70 IS_exp=0.0020R(n=224) OOS_exp=-0.0501R(n=75) OOS_win=42.67%
+  fold 11: IS[2019-06-04->2019-07-19] OOS[2019-07-19->2019-08-09] min_score=70 IS_exp=-0.0384R(n=220) OOS_exp=0.0431R(n=90) OOS_win=46.67%
+  fold 12: IS[2019-06-18->2019-08-02] OOS[2019-08-02->2019-08-23] min_score=70 IS_exp=-0.0323R(n=200) OOS_exp=0.0169R(n=106) OOS_win=43.40%
+  fold 13: IS[2019-07-02->2019-08-16] OOS[2019-08-16->2019-09-06] min_score=70 IS_exp=0.0080R(n=202) OOS_exp=-0.0205R(n=82) OOS_win=42.68%
+  fold 14: IS[2019-07-16->2019-08-30] OOS[2019-08-30->2019-09-20] min_score=70 IS_exp=0.0191R(n=188) OOS_exp=0.0343R(n=90) OOS_win=46.67%
+  fold 15: IS[2019-07-30->2019-09-13] OOS[2019-09-13->2019-10-04] min_score=75 IS_exp=0.0722R(n=51) OOS_exp=-0.0541R(n=14) OOS_win=42.86%
+  fold 16: IS[2019-08-13->2019-09-27] OOS[2019-09-27->2019-10-18] min_score=75 IS_exp=0.0508R(n=43) OOS_exp=0.1255R(n=23) OOS_win=43.48%
+  fold 17: IS[2019-08-27->2019-10-11] OOS[2019-10-11->2019-11-01] min_score=70 IS_exp=0.0495R(n=181) OOS_exp=0.0237R(n=96) OOS_win=42.71%
+  fold 18: IS[2019-09-10->2019-10-25] OOS[2019-10-25->2019-11-15] min_score=70 IS_exp=0.0834R(n=186) OOS_exp=-0.1889R(n=85) OOS_win=36.47%
+  fold 19: IS[2019-09-24->2019-11-08] OOS[2019-11-08->2019-11-29] min_score=75 IS_exp=0.0672R(n=46) OOS_exp=-0.1177R(n=15) OOS_win=40.00%
+  fold 20: IS[2019-10-08->2019-11-22] OOS[2019-11-22->2019-12-13] min_score=75 IS_exp=0.0045R(n=45) OOS_exp=-0.3172R(n=19) OOS_win=31.58%
+  fold 21: IS[2019-10-22->2019-12-06] OOS[2019-12-06->2019-12-27] min_score=70 IS_exp=-0.0926R(n=178) OOS_exp=0.1532R(n=7) OOS_win=42.86%
+  fold 22: IS[2019-11-05->2019-12-20] OOS[2019-12-20->2020-01-10] min_score=70 IS_exp=-0.0047R(n=184) OOS_exp=0.0889R(n=88) OOS_win=48.86%
+  fold 23: IS[2019-11-19->2020-01-03] OOS[2020-01-03->2020-01-24] min_score=60 IS_exp=0.0913R(n=323) OOS_exp=-0.1690R(n=295) OOS_win=39.66%
+  fold 24: IS[2019-12-03->2020-01-17] OOS[2020-01-17->2020-02-07] min_score=70 IS_exp=0.0635R(n=204) OOS_exp=-0.0400R(n=119) OOS_win=43.70%
+  fold 25: IS[2019-12-17->2020-01-31] OOS[2020-01-31->2020-02-21] min_score=70 IS_exp=0.0239R(n=209) OOS_exp=-0.0561R(n=106) OOS_win=42.45%
+  fold 26: IS[2019-12-31->2020-02-14] OOS[2020-02-14->2020-03-06] min_score=75 IS_exp=0.0314R(n=76) OOS_exp=0.1563R(n=28) OOS_win=50.00%
+  fold 27: IS[2020-01-14->2020-02-28] OOS[2020-02-28->2020-03-20] min_score=75 IS_exp=0.1008R(n=65) OOS_exp=0.6473R(n=41) OOS_win=73.17%
+  fold 28: IS[2020-01-28->2020-03-13] OOS[2020-03-13->2020-04-03] min_score=75 IS_exp=0.2613R(n=68) OOS_exp=0.2340R(n=49) OOS_win=55.10%
+  fold 29: IS[2020-02-11->2020-03-27] OOS[2020-03-27->2020-04-17] min_score=75 IS_exp=0.4299R(n=78) OOS_exp=-0.3204R(n=23) OOS_win=30.43%
+  fold 30: IS[2020-02-25->2020-04-10] OOS[2020-04-10->2020-05-01] min_score=75 IS_exp=0.2288R(n=83) OOS_exp=0.0443R(n=21) OOS_win=47.62%
+  fold 31: IS[2020-03-10->2020-04-24] OOS[2020-04-24->2020-05-15] min_score=75 IS_exp=0.2034R(n=69) OOS_exp=0.0182R(n=28) OOS_win=42.86%
+  fold 32: IS[2020-03-24->2020-05-08] OOS[2020-05-08->2020-05-29] min_score=70 IS_exp=-0.0686R(n=244) OOS_exp=0.0256R(n=120) OOS_win=42.50%
+  fold 33: IS[2020-04-07->2020-05-22] OOS[2020-05-22->2020-06-12] min_score=70 IS_exp=-0.0429R(n=240) OOS_exp=0.1964R(n=170) OOS_win=52.94%
+  fold 34: IS[2020-04-21->2020-06-05] OOS[2020-06-05->2020-06-26] min_score=70 IS_exp=0.0595R(n=299) OOS_exp=-0.1293R(n=137) OOS_win=40.15%
+  fold 35: IS[2020-05-05->2020-06-19] OOS[2020-06-19->2020-07-10] min_score=70 IS_exp=0.0728R(n=317) OOS_exp=-0.2742R(n=86) OOS_win=29.07%
+  fold 36: IS[2020-05-19->2020-07-03] OOS[2020-07-03->2020-07-24] min_score=70 IS_exp=0.0131R(n=309) OOS_exp=-0.1355R(n=105) OOS_win=36.19%
+  fold 37: IS[2020-06-02->2020-07-17] OOS[2020-07-17->2020-08-07] min_score=65 IS_exp=-0.0127R(n=583) OOS_exp=0.0942R(n=288) OOS_win=48.61%
+  fold 38: IS[2020-06-16->2020-07-31] OOS[2020-07-31->2020-08-21] min_score=75 IS_exp=0.0788R(n=72) OOS_exp=-0.0897R(n=25) OOS_win=36.00%
+  fold 39: IS[2020-06-30->2020-08-14] OOS[2020-08-14->2020-09-04] min_score=75 IS_exp=0.0988R(n=74) OOS_exp=0.1555R(n=33) OOS_win=48.48%
+  fold 40: IS[2020-07-14->2020-08-28] OOS[2020-08-28->2020-09-18] min_score=75 IS_exp=0.1443R(n=76) OOS_exp=0.2208R(n=35) OOS_win=51.43%
+  fold 41: IS[2020-07-28->2020-09-11] OOS[2020-09-11->2020-10-02] min_score=75 IS_exp=0.1188R(n=80) OOS_exp=0.0917R(n=42) OOS_win=54.76%
+  fold 42: IS[2020-08-11->2020-09-25] OOS[2020-09-25->2020-10-16] min_score=75 IS_exp=0.1198R(n=79) OOS_exp=0.1148R(n=24) OOS_win=58.33%
+  fold 43: IS[2020-08-25->2020-10-09] OOS[2020-10-09->2020-10-30] min_score=75 IS_exp=0.1035R(n=83) OOS_exp=0.2524R(n=23) OOS_win=60.87%
+  fold 44: IS[2020-09-08->2020-10-23] OOS[2020-10-23->2020-11-13] min_score=75 IS_exp=0.0771R(n=71) OOS_exp=0.0876R(n=39) OOS_win=48.72%
+  fold 45: IS[2020-09-22->2020-11-06] OOS[2020-11-06->2020-11-27] min_score=75 IS_exp=0.1678R(n=72) OOS_exp=-0.1490R(n=42) OOS_win=38.10%
+  fold 46: IS[2020-10-06->2020-11-20] OOS[2020-11-20->2020-12-11] min_score=75 IS_exp=0.0699R(n=71) OOS_exp=0.1091R(n=34) OOS_win=47.06%
+  fold 47: IS[2020-10-20->2020-12-04] OOS[2020-12-04->2020-12-25] min_score=75 IS_exp=0.1226R(n=86) OOS_exp=-0.2944R(n=28) OOS_win=32.14%
+  fold 48: IS[2020-11-03->2020-12-18] OOS[2020-12-18->2021-01-08] min_score=75 IS_exp=0.0773R(n=85) OOS_exp=-0.1432R(n=25) OOS_win=36.00%
+  fold 49: IS[2020-11-17->2021-01-01] OOS[2021-01-01->2021-01-22] min_score=75 IS_exp=0.1198R(n=17) OOS_exp=-0.2967R(n=43) OOS_win=30.23%
+  fold 50: IS[2020-12-01->2021-01-15] OOS[2021-01-15->2021-02-05] min_score=60 IS_exp=0.0060R(n=703) OOS_exp=-0.1179R(n=363) OOS_win=40.77%
+  fold 51: IS[2020-12-15->2021-01-29] OOS[2021-01-29->2021-02-19] min_score=65 IS_exp=-0.0582R(n=516) OOS_exp=-0.0396R(n=251) OOS_win=45.02%
+  fold 52: IS[2020-12-29->2021-02-12] OOS[2021-02-12->2021-03-05] min_score=70 IS_exp=-0.0176R(n=266) OOS_exp=0.0867R(n=158) OOS_win=51.27%
+  fold 53: IS[2021-01-12->2021-02-26] OOS[2021-02-26->2021-03-19] min_score=70 IS_exp=0.0186R(n=291) OOS_exp=0.0674R(n=149) OOS_win=49.66%
+  fold 54: IS[2021-01-26->2021-03-12] OOS[2021-03-12->2021-04-02] min_score=70 IS_exp=0.1136R(n=330) OOS_exp=0.0632R(n=141) OOS_win=44.68%
+  fold 55: IS[2021-02-09->2021-03-26] OOS[2021-03-26->2021-04-16] min_score=70 IS_exp=0.1130R(n=340) OOS_exp=0.1203R(n=119) OOS_win=49.58%
+  fold 56: IS[2021-02-23->2021-04-09] OOS[2021-04-09->2021-04-30] min_score=70 IS_exp=0.1410R(n=323) OOS_exp=-0.0403R(n=139) OOS_win=43.88%
+  fold 57: IS[2021-03-09->2021-04-23] OOS[2021-04-23->2021-05-14] min_score=75 IS_exp=0.0873R(n=82) OOS_exp=-0.4398R(n=30) OOS_win=23.33%
+  fold 58: IS[2021-03-23->2021-05-07] OOS[2021-05-07->2021-05-28] min_score=70 IS_exp=0.0861R(n=281) OOS_exp=-0.0765R(n=115) OOS_win=40.87%
+  fold 59: IS[2021-04-06->2021-05-21] OOS[2021-05-21->2021-06-11] min_score=70 IS_exp=-0.0057R(n=287) OOS_exp=-0.2678R(n=65) OOS_win=30.77%
+  fold 60: IS[2021-04-20->2021-06-04] OOS[2021-06-04->2021-06-25] min_score=65 IS_exp=-0.0615R(n=527) OOS_exp=-0.1882R(n=208) OOS_win=36.06%
+  fold 61: IS[2021-05-04->2021-06-18] OOS[2021-06-18->2021-07-09] min_score=65 IS_exp=-0.0764R(n=472) OOS_exp=0.0328R(n=260) OOS_win=46.15%
+  fold 62: IS[2021-05-18->2021-07-02] OOS[2021-07-02->2021-07-23] min_score=75 IS_exp=0.1548R(n=47) OOS_exp=-0.1636R(n=18) OOS_win=38.89%
+  fold 63: IS[2021-06-01->2021-07-16] OOS[2021-07-16->2021-08-06] min_score=75 IS_exp=0.0753R(n=46) OOS_exp=-0.0864R(n=22) OOS_win=40.91%
+  fold 64: IS[2021-06-15->2021-07-30] OOS[2021-07-30->2021-08-20] min_score=75 IS_exp=0.1472R(n=57) OOS_exp=-0.0967R(n=23) OOS_win=43.48%
+  fold 65: IS[2021-06-29->2021-08-13] OOS[2021-08-13->2021-09-03] min_score=65 IS_exp=0.0769R(n=494) OOS_exp=-0.0560R(n=184) OOS_win=42.39%
+  fold 66: IS[2021-07-13->2021-08-27] OOS[2021-08-27->2021-09-17] min_score=65 IS_exp=0.0269R(n=450) OOS_exp=-0.0263R(n=204) OOS_win=42.16%
+  fold 67: IS[2021-07-27->2021-09-10] OOS[2021-09-10->2021-10-01] min_score=70 IS_exp=0.0331R(n=198) OOS_exp=-0.0206R(n=92) OOS_win=44.57%
+  fold 68: IS[2021-08-10->2021-09-24] OOS[2021-09-24->2021-10-15] min_score=70 IS_exp=-0.0232R(n=187) OOS_exp=0.0747R(n=114) OOS_win=48.25%
+  fold 69: IS[2021-08-24->2021-10-08] OOS[2021-10-08->2021-10-29] min_score=70 IS_exp=0.0436R(n=200) OOS_exp=-0.1174R(n=96) OOS_win=35.42%
+  fold 70: IS[2021-09-07->2021-10-22] OOS[2021-10-22->2021-11-12] min_score=75 IS_exp=-0.0360R(n=55) OOS_exp=0.0986R(n=15) OOS_win=53.33%
+  fold 71: IS[2021-09-21->2021-11-05] OOS[2021-11-05->2021-11-26] min_score=75 IS_exp=-0.0080R(n=55) OOS_exp=0.2097R(n=39) OOS_win=53.85%
+  fold 72: IS[2021-10-05->2021-11-19] OOS[2021-11-19->2021-12-10] min_score=70 IS_exp=-0.0278R(n=238) OOS_exp=-0.0897R(n=121) OOS_win=39.67%
+  fold 73: IS[2021-10-19->2021-12-03] OOS[2021-12-03->2021-12-24] min_score=75 IS_exp=0.0722R(n=60) OOS_exp=0.0267R(n=12) OOS_win=41.67%
+  fold 74: IS[2021-11-02->2021-12-17] OOS[2021-12-17->2022-01-07] min_score=75 IS_exp=0.1319R(n=61) OOS_exp=-0.0732R(n=8) OOS_win=37.50%
+  fold 75: IS[2021-11-16->2021-12-31] OOS[2021-12-31->2022-01-21] min_score=70 IS_exp=0.0153R(n=232) OOS_exp=-0.0639R(n=116) OOS_win=42.24%
+  fold 76: IS[2021-11-30->2022-01-14] OOS[2022-01-14->2022-02-04] min_score=75 IS_exp=0.1177R(n=32) OOS_exp=-0.0926R(n=32) OOS_win=40.62%
+  fold 77: IS[2021-12-14->2022-01-28] OOS[2022-01-28->2022-02-18] min_score=70 IS_exp=0.0496R(n=222) OOS_exp=-0.0416R(n=102) OOS_win=43.14%
+  fold 78: IS[2021-12-28->2022-02-11] OOS[2022-02-11->2022-03-04] min_score=70 IS_exp=0.0597R(n=243) OOS_exp=-0.0908R(n=101) OOS_win=46.53%
+  fold 79: IS[2022-01-11->2022-02-25] OOS[2022-02-25->2022-03-18] min_score=70 IS_exp=0.0361R(n=248) OOS_exp=0.1524R(n=154) OOS_win=54.55%
+  fold 80: IS[2022-01-25->2022-03-11] OOS[2022-03-11->2022-04-01] min_score=70 IS_exp=0.1071R(n=248) OOS_exp=0.1812R(n=133) OOS_win=55.64%
+  fold 81: IS[2022-02-08->2022-03-25] OOS[2022-03-25->2022-04-15] min_score=75 IS_exp=0.1763R(n=80) OOS_exp=0.0793R(n=30) OOS_win=56.67%
+  fold 82: IS[2022-02-22->2022-04-08] OOS[2022-04-08->2022-04-29] min_score=75 IS_exp=0.2010R(n=88) OOS_exp=0.1634R(n=35) OOS_win=51.43%
+  fold 83: IS[2022-03-08->2022-04-22] OOS[2022-04-22->2022-05-13] min_score=75 IS_exp=0.1881R(n=79) OOS_exp=-0.0481R(n=46) OOS_win=45.65%
+  fold 84: IS[2022-03-22->2022-05-06] OOS[2022-05-06->2022-05-27] min_score=75 IS_exp=0.0498R(n=70) OOS_exp=-0.2560R(n=45) OOS_win=35.56%
+  fold 85: IS[2022-04-05->2022-05-20] OOS[2022-05-20->2022-06-10] min_score=65 IS_exp=-0.0045R(n=564) OOS_exp=0.0025R(n=265) OOS_win=44.15%
+  fold 86: IS[2022-04-19->2022-06-03] OOS[2022-06-03->2022-06-24] min_score=70 IS_exp=0.0136R(n=311) OOS_exp=-0.0051R(n=149) OOS_win=44.97%
+  fold 87: IS[2022-05-03->2022-06-17] OOS[2022-06-17->2022-07-08] min_score=70 IS_exp=0.0212R(n=308) OOS_exp=-0.0086R(n=133) OOS_win=44.36%
+  fold 88: IS[2022-05-17->2022-07-01] OOS[2022-07-01->2022-07-22] min_score=70 IS_exp=0.0326R(n=308) OOS_exp=-0.0996R(n=144) OOS_win=38.19%
+  fold 89: IS[2022-05-31->2022-07-15] OOS[2022-07-15->2022-08-05] min_score=75 IS_exp=0.1460R(n=79) OOS_exp=-0.0543R(n=22) OOS_win=45.45%
+  fold 90: IS[2022-06-14->2022-07-29] OOS[2022-07-29->2022-08-19] min_score=60 IS_exp=-0.0306R(n=838) OOS_exp=-0.0682R(n=314) OOS_win=42.68%
+  fold 91: IS[2022-06-28->2022-08-12] OOS[2022-08-12->2022-09-02] min_score=75 IS_exp=-0.0200R(n=64) OOS_exp=0.3180R(n=29) OOS_win=51.72%
+  fold 92: IS[2022-07-12->2022-08-26] OOS[2022-08-26->2022-09-16] min_score=75 IS_exp=-0.0294R(n=59) OOS_exp=-0.1839R(n=29) OOS_win=37.93%
+  fold 93: IS[2022-07-26->2022-09-09] OOS[2022-09-09->2022-09-30] min_score=75 IS_exp=-0.0157R(n=61) OOS_exp=0.3138R(n=25) OOS_win=60.00%
+  fold 94: IS[2022-08-09->2022-09-23] OOS[2022-09-23->2022-10-14] min_score=60 IS_exp=0.0122R(n=690) OOS_exp=-0.0174R(n=368) OOS_win=45.38%
+  fold 95: IS[2022-08-23->2022-10-07] OOS[2022-10-07->2022-10-28] min_score=75 IS_exp=0.0407R(n=66) OOS_exp=0.1041R(n=22) OOS_win=54.55%
+  fold 96: IS[2022-09-06->2022-10-21] OOS[2022-10-21->2022-11-11] min_score=75 IS_exp=0.0398R(n=57) OOS_exp=0.0837R(n=24) OOS_win=50.00%
+  fold 97: IS[2022-09-20->2022-11-04] OOS[2022-11-04->2022-11-25] min_score=75 IS_exp=0.2261R(n=57) OOS_exp=-0.0449R(n=44) OOS_win=36.36%
+  fold 98: IS[2022-10-04->2022-11-18] OOS[2022-11-18->2022-12-09] min_score=75 IS_exp=-0.0039R(n=73) OOS_exp=-0.1063R(n=21) OOS_win=38.10%
+  fold 99: IS[2022-10-18->2022-12-02] OOS[2022-12-02->2022-12-23] min_score=70 IS_exp=-0.0142R(n=253) OOS_exp=-0.1485R(n=105) OOS_win=35.24%
+  fold 100: IS[2022-11-01->2022-12-16] OOS[2022-12-16->2023-01-06] min_score=55 IS_exp=-0.0349R(n=825) OOS_exp=-0.0673R(n=350) OOS_win=42.29%
+  fold 101: IS[2022-11-15->2022-12-30] OOS[2022-12-30->2023-01-20] min_score=55 IS_exp=-0.0744R(n=829) OOS_exp=-0.0749R(n=368) OOS_win=42.39%
+  fold 102: IS[2022-11-29->2023-01-13] OOS[2023-01-13->2023-02-03] min_score=60 IS_exp=-0.0445R(n=713) OOS_exp=-0.1941R(n=364) OOS_win=37.36%
+  fold 103: IS[2022-12-13->2023-01-27] OOS[2023-01-27->2023-02-17] min_score=55 IS_exp=-0.1004R(n=823) OOS_exp=-0.1100R(n=420) OOS_win=41.90%
+  fold 104: IS[2022-12-27->2023-02-10] OOS[2023-02-10->2023-03-03] min_score=55 IS_exp=-0.0887R(n=857) OOS_exp=-0.0413R(n=396) OOS_win=44.70%
+  fold 105: IS[2023-01-10->2023-02-24] OOS[2023-02-24->2023-03-17] min_score=55 IS_exp=-0.0785R(n=874) OOS_exp=-0.1580R(n=389) OOS_win=38.05%
+  fold 106: IS[2023-01-24->2023-03-10] OOS[2023-03-10->2023-03-31] min_score=75 IS_exp=-0.0451R(n=57) OOS_exp=-0.0355R(n=37) OOS_win=43.24%
+  fold 107: IS[2023-02-07->2023-03-24] OOS[2023-03-24->2023-04-14] min_score=75 IS_exp=-0.0751R(n=64) OOS_exp=-0.0993R(n=20) OOS_win=50.00%
+  fold 108: IS[2023-02-21->2023-04-07] OOS[2023-04-07->2023-04-28] min_score=70 IS_exp=-0.0612R(n=264) OOS_exp=0.0123R(n=96) OOS_win=45.83%
+  fold 109: IS[2023-03-07->2023-04-21] OOS[2023-04-21->2023-05-12] min_score=70 IS_exp=-0.0268R(n=240) OOS_exp=-0.0265R(n=100) OOS_win=44.00%
+  fold 110: IS[2023-03-21->2023-05-05] OOS[2023-05-05->2023-05-26] min_score=70 IS_exp=0.0379R(n=243) OOS_exp=0.0249R(n=118) OOS_win=44.92%
+  fold 111: IS[2023-04-04->2023-05-19] OOS[2023-05-19->2023-06-09] min_score=70 IS_exp=0.0551R(n=228) OOS_exp=-0.1381R(n=111) OOS_win=42.34%
+  fold 112: IS[2023-04-18->2023-06-02] OOS[2023-06-02->2023-06-23] min_score=70 IS_exp=-0.0307R(n=241) OOS_exp=0.0758R(n=94) OOS_win=48.94%
+  fold 113: IS[2023-05-02->2023-06-16] OOS[2023-06-16->2023-07-07] min_score=70 IS_exp=0.0187R(n=237) OOS_exp=-0.0718R(n=86) OOS_win=43.02%
+  fold 114: IS[2023-05-16->2023-06-30] OOS[2023-06-30->2023-07-21] min_score=75 IS_exp=0.0444R(n=57) OOS_exp=0.2241R(n=39) OOS_win=53.85%
+  fold 115: IS[2023-05-30->2023-07-14] OOS[2023-07-14->2023-08-04] min_score=75 IS_exp=0.2623R(n=56) OOS_exp=-0.2075R(n=45) OOS_win=35.56%
+  fold 116: IS[2023-06-13->2023-07-28] OOS[2023-07-28->2023-08-18] min_score=70 IS_exp=0.1057R(n=240) OOS_exp=-0.0488R(n=137) OOS_win=43.07%
+  fold 117: IS[2023-06-27->2023-08-11] OOS[2023-08-11->2023-09-01] min_score=75 IS_exp=0.0104R(n=75) OOS_exp=0.0592R(n=23) OOS_win=47.83%
+  fold 118: IS[2023-07-11->2023-08-25] OOS[2023-08-25->2023-09-15] min_score=75 IS_exp=0.1228R(n=84) OOS_exp=-0.3878R(n=23) OOS_win=26.09%
+  fold 119: IS[2023-07-25->2023-09-08] OOS[2023-09-08->2023-09-29] min_score=65 IS_exp=-0.0249R(n=549) OOS_exp=-0.0828R(n=227) OOS_win=42.73%
+  fold 120: IS[2023-08-08->2023-09-22] OOS[2023-09-22->2023-10-13] min_score=65 IS_exp=-0.0594R(n=515) OOS_exp=-0.0451R(n=257) OOS_win=45.53%
+  fold 121: IS[2023-08-22->2023-10-06] OOS[2023-10-06->2023-10-27] min_score=65 IS_exp=-0.0200R(n=504) OOS_exp=-0.1479R(n=240) OOS_win=38.33%
+  fold 122: IS[2023-09-05->2023-10-20] OOS[2023-10-20->2023-11-10] min_score=55 IS_exp=-0.0619R(n=833) OOS_exp=-0.0982R(n=391) OOS_win=42.20%
+  fold 123: IS[2023-09-19->2023-11-03] OOS[2023-11-03->2023-11-24] min_score=75 IS_exp=-0.0802R(n=57) OOS_exp=-0.0022R(n=32) OOS_win=40.62%
+  fold 124: IS[2023-10-03->2023-11-17] OOS[2023-11-17->2023-12-08] min_score=55 IS_exp=-0.0999R(n=860) OOS_exp=0.0543R(n=368) OOS_win=47.83%
+  fold 125: IS[2023-10-17->2023-12-01] OOS[2023-12-01->2023-12-22] min_score=70 IS_exp=-0.0028R(n=248) OOS_exp=-0.0112R(n=103) OOS_win=45.63%
