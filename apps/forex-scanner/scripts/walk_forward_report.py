@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -22,6 +23,7 @@ from app.backtest.walk_forward import (
     backtester_segment_runner,
     report_to_text,
     run_walk_forward,
+    run_walk_forward_parallel,
     write_reports,
 )
 from app.config.env import load_dotenv
@@ -46,6 +48,16 @@ def main() -> None:
     parser.add_argument("--score-grid", default="0,55,60,65,70,75,80", help="Comma-separated min-score candidates.")
     parser.add_argument("--min-in-sample-trades", type=int, default=5)
     parser.add_argument("--output-dir", default=str(PROJECT_ROOT / "reports"))
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Parallel worker processes for the walk-forward folds "
+            "(default: all CPU cores; --jobs 1 uses the exact sequential path)."
+        ),
+    )
     args = parser.parse_args()
 
     load_dotenv()
@@ -67,6 +79,8 @@ def main() -> None:
         min_in_sample_trades=args.min_in_sample_trades,
     )
 
+    n_jobs = args.jobs if args.jobs is not None else (os.cpu_count() or 1)
+
     # database=None: walk-forward runs many short segments; we do not persist them.
     provider = build_provider(settings)
     backtester = Backtester(settings, provider, database=None)
@@ -76,11 +90,18 @@ def main() -> None:
         "walk_forward "
         f"provider={provider.name} style={style.value} symbols={','.join(symbols)} "
         f"from={start.date()} to={end.date()} is={config.in_sample_days}d oos={config.out_of_sample_days}d "
-        f"step={config.step_days}d setup={args.setup}"
+        f"step={config.step_days}d setup={args.setup} jobs={n_jobs}"
     )
     print("warning=Walk-forward backtest; resultats passes sans garantie de performance future; aucune execution broker.")
 
-    report = run_walk_forward(runner, symbols, style, setup_filter, start, end, config)
+    if n_jobs == 1:
+        # Exact sequential path — guaranteed identical to the pre-registered baseline.
+        report = run_walk_forward(runner, symbols, style, setup_filter, start, end, config)
+    else:
+        # Parallel path — each worker creates its own provider/backtester; results
+        # are sorted canonically before aggregation so output is identical to --jobs 1.
+        report = run_walk_forward_parallel(settings, symbols, style, setup_filter, start, end, config, n_jobs=n_jobs)
+
     outputs = write_reports(report, Path(args.output_dir))
     print(report_to_text(report))
     print(f"json_export={outputs['json']}")
