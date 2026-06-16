@@ -5,13 +5,21 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
+import csv
+
+from app.backtest.metrics import calculate_metrics
 from app.backtest.walk_forward import (
+    FoldResult,
     WalkForwardConfig,
+    WalkForwardReport,
+    WalkForwardWindow,
+    deduplicated_oos_trades,
     evaluate_fold,
     generate_windows,
     report_to_dict,
     run_walk_forward,
     select_min_score,
+    write_oos_registry,
     write_reports,
 )
 from app.core.types import (
@@ -157,3 +165,67 @@ def test_run_walk_forward_aggregates_oos_only(tmp_path) -> None:
     assert outputs["txt"].read_text().startswith("Walk-Forward")
     # Sanity: serialisation round-trips the fold count.
     assert report_to_dict(report)["fold_count"] == len(report.folds)
+
+
+def _window(idx: int, day: int) -> WalkForwardWindow:
+    base = BASE + timedelta(days=day)
+    return WalkForwardWindow(
+        fold_index=idx,
+        in_sample_start=base,
+        in_sample_end=base + timedelta(days=45),
+        out_of_sample_start=base + timedelta(days=45),
+        out_of_sample_end=base + timedelta(days=66),
+    )
+
+
+def _fold(idx: int, day: int, trades) -> FoldResult:
+    return FoldResult(
+        window=_window(idx, day),
+        selected_min_score=60.0,
+        in_sample_trades=len(trades),
+        in_sample_expectancy=0.0,
+        out_of_sample_trades=len(trades),
+        out_of_sample_metrics=calculate_metrics(trades),
+        oos_trade_records=trades,
+    )
+
+
+def _report(folds) -> WalkForwardReport:
+    return WalkForwardReport(
+        config=WalkForwardConfig(in_sample_days=45, out_of_sample_days=21, step_days=14),
+        symbols=["EUR/USD"], style=TradingStyle.DAY_TRADING, setup_filter="all",
+        start=BASE, end=BASE + timedelta(days=120), folds=folds,
+        aggregate_metrics=calculate_metrics([]), oos_equity_curve=[],
+    )
+
+
+def test_deduplicated_oos_trades_removes_overlap_duplicates() -> None:
+    a = _trade(1.0, 70.0, day=10)
+    b = _trade(-1.0, 65.0, day=20)   # appears in BOTH folds (7-day overlap)
+    c = _trade(0.5, 72.0, day=30)
+    report = _report([_fold(0, 0, [a, b]), _fold(1, 14, [b, c])])
+
+    unique = deduplicated_oos_trades(report)
+    # b counted once -> 3 unique, not 4.
+    assert len(unique) == 3
+    keys = {(t.symbol, t.entry_time) for t in unique}
+    assert len(keys) == 3
+
+
+def test_write_oos_registry_schema_and_dedup(tmp_path) -> None:
+    a = _trade(1.0, 70.0, day=10)
+    b = _trade(-1.0, 65.0, day=20)
+    report = _report([_fold(0, 0, [a, b]), _fold(1, 14, [b])])
+
+    path = write_oos_registry(report, tmp_path / "oos_trade_registry.csv")
+    with path.open() as handle:
+        rows = list(csv.DictReader(handle))
+    assert [c for c in rows[0].keys()] == ["pair", "timestamp", "score", "gross_r", "net_r", "exit_reason"]
+    assert len(rows) == 2  # b deduplicated
+    assert {r["pair"] for r in rows} == {"EUR/USD"}
+
+
+def test_write_reports_includes_registry(tmp_path) -> None:
+    report = _report([_fold(0, 0, [_trade(1.0, 70.0, day=5)])])
+    outputs = write_reports(report, tmp_path)
+    assert "registry" in outputs and outputs["registry"].exists()

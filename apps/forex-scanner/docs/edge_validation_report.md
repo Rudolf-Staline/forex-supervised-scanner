@@ -12,6 +12,42 @@ end-to-end on real data with realistic spreads and SL/TP dynamics.
 
 ---
 
+## RÈGLE DE DÉCISION (pré-enregistrée — figée AVANT le run puissant multi-paires)
+
+Cette règle est gelée **avant** d'obtenir le moindre résultat du run multi-paires.
+Le verdict (Étape 3) l'appliquera **telle quelle**, sans déplacer aucun critère
+a posteriori.
+
+**Critères de verdict** (sur l'expectancy **nette** OOS, après coûts réels) :
+
+- **NO-GO** : la borne **haute** de l'IC95 (groupé) du net OOS est **< 0**
+  (l'edge net est significativement négatif).
+- **GO CONDITIONNEL** (⇒ *forward paper live uniquement*, jamais argent réel
+  direct) : **toutes** les conditions suivantes réunies —
+  1. borne **basse** de l'IC95 (groupé) du net OOS **> 0** ;
+  2. calibration **monotone** : IC95 du Spearman(score, R_net) **> 0** ;
+  3. net positif sur la **majorité des paires** ;
+  4. net positif sur **les deux moitiés** de la période (1re et 2e).
+- **NON-CONCLUANT** : tout le reste (IC chevauchant zéro, incohérence
+  paires/moitiés, ou puissance insuffisante).
+
+**Paramètres figés :**
+
+- Fenêtres : in-sample **45 j**, out-of-sample **21 j**, step **14 j**.
+- Grille de score (réglée in-sample uniquement) : `0, 50, 55, 60, 65, 70, 75`.
+- `min_in_sample_trades = 8`.
+- **IC = bootstrap 95 % GROUPÉ** : cluster par paire **et** block bootstrap
+  temporel ; **le plus conservateur (le plus large) des deux gouverne** le verdict.
+- Déduplication OOS obligatoire (chevauchement 7 j car step 14 < oos 21).
+
+**Puissance cible :** N OOS **effectif** ≥ **878** (résout ±0.10 R) ; viser
+≥ **3 500** (résout ±0.05 R). En deçà : NON-CONCLUANT (sous-puissant).
+
+**Univers & période :** figés au moment du fetch (fournis par l'opérateur), non
+modifiables après lecture des résultats.
+
+---
+
 ## DÉCISION — **NO-GO sur l'approche actuelle**
 
 **Question décisive : existe-t-il un signal BRUT exploitable ?** → **Non.**
