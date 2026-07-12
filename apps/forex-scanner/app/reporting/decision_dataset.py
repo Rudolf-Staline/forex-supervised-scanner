@@ -27,7 +27,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Iterable
 
 SCHEMA_VERSION = "decision_calibration_dataset.v1"
 
