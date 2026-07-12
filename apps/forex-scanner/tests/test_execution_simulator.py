@@ -179,6 +179,37 @@ def test_bid_ask_model_embeds_cost_in_executable_prices() -> None:
     assert result.path_frame["high"].iloc[-1] == pytest.approx(1.1102)
 
 
+def test_per_bar_spread_derives_ask_for_long_activation() -> None:
+    future = _legacy(
+        [
+            # Bid crosses 1.1000, but derived ask stays above it: no long fill.
+            (1.1002, 1.0999, 1.1000),
+            (1.1010, 1.1003, 1.1008),
+        ]
+    )
+    future["spread"] = 0.0002
+
+    assert _simulate(future) is None
+
+
+def test_per_bar_spread_uses_ask_for_short_stop() -> None:
+    plan = _risk_plan(entry=1.1000, stop_loss=1.1050, take_profit=1.0900)
+    future = _legacy(
+        [
+            (1.1002, 1.0997, 1.1000),
+            # Bid high is below stop, derived ask high crosses it.
+            (1.1049, 1.1020, 1.1040),
+        ]
+    )
+    future["spread"] = 0.0002
+    result = _simulate(future, direction=DirectionBias.SHORT, plan=plan)
+
+    assert result is not None
+    assert result.execution_model == "bid_ohlc_plus_spread"
+    assert result.exit_reason == "stop_loss"
+    assert result.net_r == pytest.approx(-1.0)
+
+
 def test_partial_bid_ask_schema_fails_loudly() -> None:
     future = _legacy([(1.1010, 1.0990, 1.1005)])
     future["bid_high"] = future["high"]
