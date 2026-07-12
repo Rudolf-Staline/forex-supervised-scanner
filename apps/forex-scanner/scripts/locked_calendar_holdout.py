@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -85,6 +86,11 @@ def _load_rows(path: Path) -> list[dict[str, object]]:
     return rows
 
 
+def _as_utc_timestamp(value: object) -> datetime:
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Preregister or evaluate a locked calendar holdout. No model is persisted."
@@ -147,8 +153,15 @@ def main() -> None:
         raise SystemExit(
             f"locked holdout already evaluated: receipt exists at {receipt}; replay refused"
         )
-    rows = _load_rows(args.dataset)
+
     plan = load_holdout_plan(args.plan)
+    holdout_end = _as_utc_timestamp(plan["holdout_end"])
+    if not bool(plan.get("historical_dry_run")) and datetime.now(timezone.utc) < holdout_end:
+        raise SystemExit(
+            f"locked holdout is still open until {holdout_end.isoformat()}; early evaluation refused"
+        )
+
+    rows = _load_rows(args.dataset)
     manifest = args.dataset_manifest if args.dataset_manifest.is_file() else None
     result = evaluate_locked_holdout(
         rows,
