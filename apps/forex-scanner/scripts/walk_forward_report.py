@@ -1,9 +1,10 @@
 """Walk-forward / out-of-sample backtest report. Reporting only; no orders are sent.
 
-Thresholds are tuned exclusively on each in-sample fold. By default, the
-canonical de-duplicated OOS candidates are then passed through portfolio
-constraints before headline metrics are published. Use ``--no-portfolio`` only
-for candidate-level diagnostics or historical reproducibility.
+Thresholds are selected exclusively on each in-sample fold. The default policy
+uses zero-prior shrinkage, a one-sided uncertainty penalty, a materially larger
+sample floor, and explicit abstention. The canonical de-duplicated OOS candidates
+are then passed through portfolio constraints before headline metrics are
+published.
 """
 
 from __future__ import annotations
@@ -19,6 +20,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.backtest.conservative_walk_forward import (
+    run_conservative_walk_forward,
+    run_conservative_walk_forward_parallel,
+    threshold_result_to_text,
+    write_threshold_reports,
+)
 from app.backtest.engine import Backtester
 from app.backtest.portfolio import PortfolioConstraints
 from app.backtest.portfolio_walk_forward import (
@@ -26,12 +33,11 @@ from app.backtest.portfolio_walk_forward import (
     portfolio_report_to_text,
     write_portfolio_walk_forward_reports,
 )
+from app.backtest.threshold_selection import ThresholdSelectionConfig
 from app.backtest.walk_forward import (
     WalkForwardConfig,
     backtester_segment_runner,
     report_to_text,
-    run_walk_forward,
-    run_walk_forward_parallel,
     write_reports,
 )
 from app.config.env import load_dotenv
@@ -56,12 +62,21 @@ def main() -> None:
     symbols = _resolve_symbols(args.symbols, args.watchlist)
     score_grid = tuple(float(value) for value in args.score_grid.split(",") if value.strip())
 
-    config = WalkForwardConfig(
+    walk_config = WalkForwardConfig(
         in_sample_days=args.in_sample_days,
         out_of_sample_days=args.out_of_sample_days,
         step_days=args.step_days,
         score_grid=score_grid,
         min_in_sample_trades=args.min_in_sample_trades,
+    )
+    threshold_config = ThresholdSelectionConfig(
+        score_grid=score_grid,
+        min_trades=args.min_in_sample_trades,
+        objective=args.threshold_objective,
+        shrinkage_trades=args.shrinkage_trades,
+        confidence_z=args.confidence_z,
+        minimum_objective_r=args.minimum_threshold_objective_r,
+        allow_abstention=not args.no_threshold_abstention,
     )
     n_jobs = args.jobs if args.jobs is not None else (os.cpu_count() or 1)
 
@@ -72,9 +87,11 @@ def main() -> None:
     print(
         "walk_forward "
         f"provider={provider.name} style={style.value} symbols={','.join(symbols)} "
-        f"from={start.date()} to={end.date()} is={config.in_sample_days}d "
-        f"oos={config.out_of_sample_days}d step={config.step_days}d "
-        f"setup={args.setup} jobs={n_jobs} portfolio={args.portfolio}"
+        f"from={start.date()} to={end.date()} is={walk_config.in_sample_days}d "
+        f"oos={walk_config.out_of_sample_days}d step={walk_config.step_days}d "
+        f"setup={args.setup} jobs={n_jobs} portfolio={args.portfolio} "
+        f"threshold_objective={threshold_config.objective} "
+        f"min_is_trades={threshold_config.min_trades}"
     )
     print(
         "warning=Walk-forward backtest; resultats passes sans garantie de performance future; "
@@ -82,19 +99,30 @@ def main() -> None:
     )
 
     if n_jobs == 1:
-        report = run_walk_forward(runner, symbols, style, setup_filter, start, end, config)
+        threshold_result = run_conservative_walk_forward(
+            runner,
+            symbols,
+            style,
+            setup_filter,
+            start,
+            end,
+            walk_config,
+            threshold_config,
+        )
     else:
-        report = run_walk_forward_parallel(
+        threshold_result = run_conservative_walk_forward_parallel(
             settings,
             symbols,
             style,
             setup_filter,
             start,
             end,
-            config,
+            walk_config,
+            threshold_config,
             n_jobs=n_jobs,
         )
 
+    report = threshold_result.report
     output_dir = Path(args.output_dir)
     if args.portfolio:
         constraints = _portfolio_constraints(args)
@@ -109,8 +137,12 @@ def main() -> None:
             "candidates, not an attainable multi-pair allocation."
         )
 
+    threshold_outputs = write_threshold_reports(threshold_result, output_dir)
+    print(threshold_result_to_text(threshold_result))
     for label, path in outputs.items():
         print(f"{label}_export={path}")
+    for label, path in threshold_outputs.items():
+        print(f"threshold_{label}_export={path}")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -136,7 +168,41 @@ def _build_parser() -> argparse.ArgumentParser:
         default="0,55,60,65,70,75,80",
         help="Comma-separated min-score candidates.",
     )
-    parser.add_argument("--min-in-sample-trades", type=int, default=5)
+    parser.add_argument(
+        "--min-in-sample-trades",
+        type=int,
+        default=50,
+        help="Minimum retained IS trades required for a threshold to be eligible.",
+    )
+    parser.add_argument(
+        "--threshold-objective",
+        default="conservative_lcb",
+        choices=["conservative_lcb", "mean_expectancy"],
+        help="Threshold ranking objective. conservative_lcb is the research default.",
+    )
+    parser.add_argument(
+        "--shrinkage-trades",
+        type=float,
+        default=50.0,
+        help="Zero-prior strength, expressed as equivalent trades.",
+    )
+    parser.add_argument(
+        "--confidence-z",
+        type=float,
+        default=1.645,
+        help="One-sided uncertainty penalty; 1.645 approximates a 95%% lower bound.",
+    )
+    parser.add_argument(
+        "--minimum-threshold-objective-r",
+        type=float,
+        default=0.0,
+        help="Minimum objective required to trade a fold rather than abstain.",
+    )
+    parser.add_argument(
+        "--no-threshold-abstention",
+        action="store_true",
+        help="Disable no-trade abstention. Intended only for legacy reproduction.",
+    )
     parser.add_argument("--output-dir", default=str(PROJECT_ROOT / "reports"))
     parser.add_argument(
         "--jobs",
