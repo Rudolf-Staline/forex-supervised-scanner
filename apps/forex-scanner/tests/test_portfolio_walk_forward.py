@@ -156,6 +156,8 @@ def test_portfolio_report_exposes_candidate_and_attainable_metrics_separately() 
     assert oos["aggregation"] == "deduplicated_then_portfolio_constrained"
     assert payload["candidate_out_of_sample"]["total_trades"] == 2
     assert payload["portfolio"]["rejections"][0]["reason"] == "max_concurrent_positions"
+    assert payload["artifacts"]["candidate_registry"] == "oos_trade_registry.csv"
+    assert payload["artifacts"]["portfolio_registry"] == "portfolio_trade_registry.csv"
 
     text = portfolio_report_to_text(result)
     assert "Attainable portfolio OUT-OF-SAMPLE performance" in text
@@ -163,7 +165,7 @@ def test_portfolio_report_exposes_candidate_and_attainable_metrics_separately() 
     assert "accepted trades          : 1" in text
 
 
-def test_report_writers_keep_headline_registry_aligned_with_portfolio_metrics(tmp_path) -> None:
+def test_report_writers_keep_candidate_and_portfolio_registries_distinct(tmp_path) -> None:
     accepted = _trade("EUR/USD", entry_hour=1, exit_hour=4, score=90, net_r=1.0)
     rejected = _trade("GBP/USD", entry_hour=1, exit_hour=3, score=80, net_r=-1.0)
     source = _report([_fold(0, [accepted, rejected])])
@@ -178,16 +180,18 @@ def test_report_writers_keep_headline_registry_aligned_with_portfolio_metrics(tm
 
     outputs = write_portfolio_walk_forward_reports(result, tmp_path)
 
-    with outputs["registry"].open() as handle:
-        accepted_rows = list(csv.DictReader(handle))
     with outputs["candidate_registry"].open() as handle:
         candidate_rows = list(csv.DictReader(handle))
+    with outputs["portfolio_registry"].open() as handle:
+        accepted_rows = list(csv.DictReader(handle))
     with outputs["rejections"].open() as handle:
         rejection_rows = list(csv.DictReader(handle))
 
+    assert outputs["candidate_registry"].name == "oos_trade_registry.csv"
+    assert outputs["portfolio_registry"].name == "portfolio_trade_registry.csv"
+    assert {row["pair"] for row in candidate_rows} == {"EUR/USD", "GBP/USD"}
     assert len(accepted_rows) == result.aggregate_metrics.number_of_trades == 1
     assert accepted_rows[0]["pair"] == "EUR/USD"
-    assert {row["pair"] for row in candidate_rows} == {"EUR/USD", "GBP/USD"}
     assert rejection_rows[0]["pair"] == "GBP/USD"
     assert rejection_rows[0]["reason"] == "max_concurrent_positions"
     assert json.loads(outputs["json"].read_text())["out_of_sample"]["accepted_trades"] == 1
