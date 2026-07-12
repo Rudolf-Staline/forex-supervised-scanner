@@ -64,6 +64,22 @@ def _trade(
     )
 
 
+def _result(symbols, style, setup_filter, start, end, trades):  # noqa: ANN001
+    return BacktestResult(
+        run_id="x",
+        created_at=BASE,
+        symbols=symbols,
+        style=style,
+        setup_filter=setup_filter,
+        start=start,
+        end=end,
+        metrics=calculate_metrics(trades),
+        trades=trades,
+        equity_curve=[],
+        limitations=[],
+    )
+
+
 def test_generate_windows_are_sequential_and_disjoint_train_test() -> None:
     config = WalkForwardConfig(in_sample_days=30, out_of_sample_days=10, step_days=10)
     windows = generate_windows(BASE, BASE + timedelta(days=70), config)
@@ -124,19 +140,7 @@ def test_run_walk_forward_segments_are_disjoint_at_boundary() -> None:
     def runner(symbols, style, setup_filter, start, end):  # noqa: ANN001
         kind = "IS" if (end - start) > timedelta(days=15) else "OOS"
         calls.append((kind, start, end))
-        return BacktestResult(
-            run_id="x",
-            created_at=BASE,
-            symbols=symbols,
-            style=style,
-            setup_filter=setup_filter,
-            start=start,
-            end=end,
-            metrics=calculate_metrics([]),
-            trades=[],
-            equity_curve=[],
-            limitations=[],
-        )
+        return _result(symbols, style, setup_filter, start, end, [])
 
     run_walk_forward(
         runner,
@@ -175,19 +179,7 @@ def test_run_walk_forward_aggregates_unique_oos_only(tmp_path) -> None:
                 _trade(0.8, 80.0, day=segment_day),
                 _trade(-0.5, 55.0, day=segment_day + 1),
             ]
-        return BacktestResult(
-            run_id="x",
-            created_at=BASE,
-            symbols=symbols,
-            style=style,
-            setup_filter=setup_filter,
-            start=start,
-            end=end,
-            metrics=calculate_metrics(trades),
-            trades=trades,
-            equity_curve=[],
-            limitations=[],
-        )
+        return _result(symbols, style, setup_filter, start, end, trades)
 
     report = run_walk_forward(
         runner,
@@ -273,29 +265,19 @@ def test_primary_aggregate_metrics_and_equity_use_deduplicated_sample() -> None:
     shared = _trade(-1.0, 70.0, day=17, exit_day=18)
 
     def runner(symbols, style, setup_filter, start, end):  # noqa: ANN001
-        is_segment = (end - start) > timedelta(days=9, hours=23)
-        if is_segment:
+        duration = end - start
+        if duration < timedelta(days=10):  # IS ends one microsecond before the boundary.
             trades = [_trade(0.1, 70.0, day=(start - BASE).days)]
         else:
+            trades = []
+            if start <= shared.entry_time <= end:
+                trades.append(shared)
             fold_start = (start - BASE).days
-            trades = [shared]
             if fold_start == 10:
                 trades.append(_trade(1.0, 70.0, day=11, exit_day=12))
             elif fold_start == 15:
                 trades.append(_trade(0.5, 70.0, day=22, exit_day=23))
-        return BacktestResult(
-            run_id="x",
-            created_at=BASE,
-            symbols=symbols,
-            style=style,
-            setup_filter=setup_filter,
-            start=start,
-            end=end,
-            metrics=calculate_metrics(trades),
-            trades=trades,
-            equity_curve=[],
-            limitations=[],
-        )
+        return _result(symbols, style, setup_filter, start, end, trades)
 
     report = run_walk_forward(
         runner,
@@ -310,7 +292,7 @@ def test_primary_aggregate_metrics_and_equity_use_deduplicated_sample() -> None:
     assert raw_oos_trade_count(report) == 4
     assert report.aggregate_metrics.number_of_trades == 3
     assert report.aggregate_metrics.expectancy == round((1.0 - 1.0 + 0.5) / 3, 4)
-    assert len(report.oos_equity_curve) == 4  # origin + three unique trades
+    assert len(report.oos_equity_curve) == 4
     payload = report_to_dict(report)["out_of_sample"]
     assert payload["raw_fold_trade_records"] == 4
     assert payload["duplicates_removed"] == 1
