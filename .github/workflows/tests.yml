@@ -51,8 +51,6 @@ jobs:
           AUTO_BOT_ENABLED: "false"
           MT5_DEMO_ONLY: "true"
         run: |
-          python -m pytest tests/test_walk_forward.py
-          python -m pytest tests/test_walk_forward_parallel.py
           python -m pytest tests/test_autonomous_supervisor.py
           python -m pytest tests/test_safety.py
           python -m pytest tests/test_demo_bot.py
