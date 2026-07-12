@@ -45,15 +45,17 @@ When portfolio mode is enabled:
 
 - `portfolio_walk_forward.json`: full machine-readable result;
 - `portfolio_walk_forward.txt`: concise human-readable summary;
-- `oos_trade_registry.csv`: accepted trades only; this matches headline metrics;
-- `oos_candidate_registry.csv`: all canonical OOS candidates before allocation;
+- `oos_trade_registry.csv`: all canonical OOS candidates, preserving the existing
+  score-calibration and signal-diagnostics contract;
+- `portfolio_trade_registry.csv`: accepted trades only; this matches portfolio
+  headline metrics;
 - `portfolio_rejections.csv`: rejected candidates with reason and state snapshot.
 
-The accepted registry is intentionally kept at the existing
-`oos_trade_registry.csv` path so downstream edge and calibration tools consume
-the same sample summarized by the headline report. The candidate registry remains
-available for diagnosing whether the signal engine or the portfolio constraints
-caused a performance change.
+The two trade registries are intentionally distinct. Signal calibration and
+candidate-level score analysis should use `oos_trade_registry.csv`. Attainable
+portfolio edge, drawdown, and allocation analysis should use
+`portfolio_trade_registry.csv`. This avoids conditioning the score calibration on
+portfolio constraints while keeping the portfolio headline sample fully auditable.
 
 ## Current assumptions
 
