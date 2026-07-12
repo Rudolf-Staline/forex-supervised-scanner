@@ -133,6 +133,7 @@ def build_shadow_labels(
             "not_activated_return_r": rules.not_activated_return_r,
             "entry_exit_model": "app.backtest.execution.simulate_execution",
             "intrabar_policy": "stop_first_and_flag_ambiguous",
+            "holding_horizon": "entry_timeframe_bars_converted_to_trigger_timeframe_bars",
         },
     }
     return ShadowLabelReport(labels=labels, failures=failures, summary=summary, manifest=manifest)
@@ -332,6 +333,16 @@ def _candidate_level_error(row: dict[str, object]) -> str | None:
     return None
 
 
+def _trigger_hold_bars(settings: AppSettings, style: TradingStyle) -> int:
+    style_settings = settings.styles[style]
+    ratio = max(
+        1,
+        TIMEFRAME_MINUTES[style_settings.entry_timeframe]
+        // TIMEFRAME_MINUTES[style_settings.trigger_timeframe],
+    )
+    return style_settings.max_hold_bars * ratio
+
+
 def _fetch_group_frame(
     *,
     symbol: str,
@@ -342,7 +353,7 @@ def _fetch_group_frame(
 ) -> pd.DataFrame:
     timestamps = [_timestamp(row.get("decision_timestamp")) for row in candidates]
     styles = [TradingStyle(str(row.get("style") or "")) for row in candidates]
-    max_hold = max(settings.styles[style].max_hold_bars for style in styles)
+    max_hold = max(_trigger_hold_bars(settings, style) for style in styles)
     minutes = TIMEFRAME_MINUTES[timeframe]
     warmup_bars = max(220, settings.provider.max_bars)
     start = min(timestamps) - timedelta(minutes=minutes * warmup_bars)
@@ -368,8 +379,9 @@ def _label_one(
 ) -> dict[str, object]:
     style = TradingStyle(str(row.get("style") or ""))
     style_settings = settings.styles[style]
+    hold_bars = _trigger_hold_bars(settings, style)
     decision_time = _timestamp(row.get("decision_timestamp"))
-    future = frame.loc[frame.index > pd.Timestamp(decision_time)].head(style_settings.max_hold_bars)
+    future = frame.loc[frame.index > pd.Timestamp(decision_time)].head(hold_bars)
     if len(future) < config.minimum_future_bars:
         raise ValueError(
             f"insufficient future bars: have={len(future)} need={config.minimum_future_bars}"
@@ -403,7 +415,7 @@ def _label_one(
         "label_source": "shadow_historical",
         "provider": provider_name,
         "trigger_timeframe": timeframe.value,
-        "max_hold_bars": style_settings.max_hold_bars,
+        "max_hold_bars": hold_bars,
         "candidate_final_score": _number(row.get("final_score")),
         "candidate_rejection_category": row.get("rejection_category"),
         "candidate_rejection_reason": row.get("rejection_reason"),
