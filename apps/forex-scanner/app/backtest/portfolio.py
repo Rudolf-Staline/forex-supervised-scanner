@@ -132,13 +132,16 @@ def simulate_portfolio(
                 )
                 continue
 
-            same_symbol = sum(position.symbol == trade.symbol for position in active)
+            trade_symbol = normalized_symbol(trade.symbol)
+            same_symbol = sum(
+                normalized_symbol(position.symbol) == trade_symbol for position in active
+            )
             if same_symbol >= rules.max_same_symbol_positions:
                 rejected.append(
                     _rejection(
                         trade,
                         "same_symbol_limit",
-                        f"{same_symbol} active {trade.symbol} position(s); limit is "
+                        f"{same_symbol} active {trade_symbol} position(s); limit is "
                         f"{rules.max_same_symbol_positions}",
                         active_symbols,
                         exposure_before,
@@ -188,7 +191,7 @@ def simulate_portfolio(
 
     accepted_by_exit = sorted(
         accepted,
-        key=lambda trade: (trade.exit_time, trade.symbol, trade.entry_time),
+        key=lambda trade: (trade.exit_time, normalized_symbol(trade.symbol), trade.entry_time),
     )
     equity_curve: list[tuple[datetime, float]] = []
     cumulative = 0.0
@@ -235,6 +238,13 @@ def split_symbol(symbol: str) -> tuple[str, str]:
     if len(normalized) != 6:
         raise ValueError(f"cannot infer base/quote currencies from symbol {symbol!r}")
     return normalized[:3], normalized[3:]
+
+
+def normalized_symbol(symbol: str) -> str:
+    """Return a separator-independent symbol key such as ``EURUSD``."""
+
+    base, quote = split_symbol(symbol)
+    return f"{base}{quote}"
 
 
 def simulation_to_dict(result: PortfolioSimulation) -> dict[str, object]:
@@ -295,7 +305,7 @@ def _priority_key(trade: TradeRecord) -> tuple[float, float, str, datetime]:
     technical_score = (
         float(trade.technical_score) if trade.technical_score is not None else float("-inf")
     )
-    return -final_score, -technical_score, trade.symbol, trade.exit_time
+    return -final_score, -technical_score, normalized_symbol(trade.symbol), trade.exit_time
 
 
 def _exposure_breaches(
