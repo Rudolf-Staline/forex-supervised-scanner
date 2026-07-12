@@ -9,12 +9,25 @@ from typing import Literal
 
 import pandas as pd
 
+from app.backtest.execution import simulate_execution
 from app.backtest.metrics import calculate_metrics
 from app.backtest.outcomes import evaluate_path
 from app.config.settings import AppSettings
-from app.core.types import BacktestResult, DirectionBias, MarketRegime, RiskPlan, SessionName, SetupFamily, SetupSubtype, TIMEFRAME_MINUTES, Timeframe, TradeRecord, TradingStyle
+from app.core.types import (
+    BacktestResult,
+    DirectionBias,
+    MarketRegime,
+    RiskPlan,
+    SessionName,
+    SetupFamily,
+    SetupSubtype,
+    TIMEFRAME_MINUTES,
+    Timeframe,
+    TradeRecord,
+    TradingStyle,
+)
 from app.data.providers import MarketDataProvider
-from app.data.validation import pips_to_price, price_to_pips, window_for_bars
+from app.data.validation import window_for_bars
 from app.indicators.calculations import add_indicators
 from app.indicators.levels import find_key_levels
 from app.market_regime.regime import MarketRegimeDetector
@@ -59,8 +72,10 @@ class Backtester:
             "signals whose entry is never reached within the holding window are recorded as not "
             "triggered and excluded from P&L (no assumed fill).",
             "If a candle touches both SL and TP, the backtester assumes the stop loss was hit first.",
-            "Transaction cost is modeled as one full bid-ask spread per round trip, taken from the "
-            "per-symbol data spread when available and otherwise from the fixed round-trip pip cost in settings.",
+            "When explicit bid/ask OHLC columns are available, fills and exits use the executable "
+            "quote side. Otherwise one full spread is deducted from the legacy single-price path.",
+            "A terminal event on the activation candle is intrabar-ambiguous because OHLC bars do "
+            "not reveal event order; the simulator marks it and retains the conservative stop-first rule.",
         ]
         not_triggered = 0
         for symbol in symbols:
@@ -169,7 +184,10 @@ class Backtester:
 
             _score, setup, risk_plan, score_result = max(scored, key=lambda item: item[0])
             future = trigger.loc[trigger.index > timestamp]
-            max_hold = style_settings.max_hold_bars * max(1, TIMEFRAME_MINUTES[entry_tf] // TIMEFRAME_MINUTES[trigger_tf])
+            max_hold = style_settings.max_hold_bars * max(
+                1,
+                TIMEFRAME_MINUTES[entry_tf] // TIMEFRAME_MINUTES[trigger_tf],
+            )
             trade = _simulate_trade(
                 symbol=symbol,
                 style=style,
@@ -228,76 +246,28 @@ def _simulate_trade(
     pattern_score: float,
     spread_price: float | None = None,
 ) -> TradeRecord | None:
-    entry_level = float(risk_plan.entry)
+    """Compatibility wrapper around the reusable execution simulator."""
 
-    # Fill modeling: the planned entry behaves like a resting order. It is only
-    # filled when a later bar trades through ``entry_level`` (low <= entry <= high).
-    # If the entry is never reached within the holding window, the signal is not
-    # triggered: we return None so the caller excludes it from P&L (no assumed fill).
-    activation_index: int | None = None
-    for position, (_timestamp, row) in enumerate(future.iterrows()):
-        if float(row["low"]) <= entry_level <= float(row["high"]):
-            activation_index = position
-            break
-    if activation_index is None:
+    execution = simulate_execution(
+        symbol=symbol,
+        direction=direction,
+        risk_plan=risk_plan,
+        future=future,
+        signal_time=entry_time,
+        cost_pips=cost_pips,
+        spread_price=spread_price,
+    )
+    if execution is None:
         return None
 
-    bars_to_activation = activation_index + 1
-    active_future = future.iloc[activation_index:]
-
-    exit_reason: Literal["take_profit", "stop_loss", "time_exit", "end_of_data"] = "end_of_data"
-    exit_price = float(risk_plan.entry)
-    exit_time = entry_time.to_pydatetime() if hasattr(entry_time, "to_pydatetime") else entry_time
-    exit_bar_count = 0
-
-    for bar_number, (timestamp, row) in enumerate(active_future.iterrows(), start=1):
-        high = float(row["high"])
-        low = float(row["low"])
-        if direction == DirectionBias.LONG:
-            stop_hit = low <= risk_plan.stop_loss
-            target_hit = high >= risk_plan.take_profit
-        else:
-            stop_hit = high >= risk_plan.stop_loss
-            target_hit = low <= risk_plan.take_profit
-        if stop_hit:
-            exit_reason = "stop_loss"
-            exit_price = float(risk_plan.stop_loss)
-            exit_time = timestamp.to_pydatetime()
-            exit_bar_count = bar_number
-            break
-        if target_hit:
-            exit_reason = "take_profit"
-            exit_price = float(risk_plan.take_profit)
-            exit_time = timestamp.to_pydatetime()
-            exit_bar_count = bar_number
-            break
-    else:
-        if not active_future.empty:
-            last = active_future.iloc[-1]
-            exit_price = float(last["close"])
-            exit_time = active_future.index[-1].to_pydatetime()
-            exit_reason = "time_exit"
-            exit_bar_count = len(active_future)
-
-    risk_distance = abs(float(risk_plan.entry) - float(risk_plan.stop_loss))
-    if direction == DirectionBias.LONG:
-        gross_profit = exit_price - float(risk_plan.entry)
-    else:
-        gross_profit = float(risk_plan.entry) - exit_price
-    # Realistic round-trip cost: a long buys at the ask and exits at the bid (and
-    # vice-versa for a short), so crossing one full bid-ask spread per round trip is
-    # an honest, conservative friction. Use the per-symbol spread carried by the data
-    # (price units) when available; otherwise fall back to the fixed pip cost.
-    if spread_price is not None and spread_price > 0.0:
-        cost_price = float(spread_price)
-        effective_cost_pips = round(price_to_pips(symbol, cost_price), 4)
-    else:
-        cost_price = pips_to_price(symbol, cost_pips)
-        effective_cost_pips = cost_pips
-    gross_r = gross_profit / max(risk_distance, 1e-12)
-    net_r = (gross_profit - cost_price) / max(risk_distance, 1e-12)
-    path_future = active_future.head(exit_bar_count) if exit_bar_count else active_future
-    path = evaluate_path(direction, risk_plan, path_future, exit_reason, net_r, bars_to_activation=bars_to_activation)
+    path = evaluate_path(
+        direction,
+        risk_plan,
+        execution.path_frame,
+        execution.exit_reason,
+        execution.net_r,
+        bars_to_activation=execution.bars_to_activation,
+    )
 
     return TradeRecord(
         symbol=symbol,
@@ -306,15 +276,15 @@ def _simulate_trade(
         setup_subtype=subtype,
         direction=direction,
         entry_time=entry_time.to_pydatetime() if hasattr(entry_time, "to_pydatetime") else entry_time,
-        exit_time=exit_time,
-        entry=float(risk_plan.entry),
+        exit_time=execution.exit_time,
+        entry=execution.entry_price,
         stop_loss=float(risk_plan.stop_loss),
         take_profit=float(risk_plan.take_profit),
-        exit_price=exit_price,
-        gross_r=round(gross_r, 4),
-        net_r=round(net_r, 4),
-        exit_reason=exit_reason,
-        cost_pips=effective_cost_pips,
+        exit_price=execution.exit_price,
+        gross_r=round(execution.gross_r, 4),
+        net_r=round(execution.net_r, 4),
+        exit_reason=execution.exit_reason,
+        cost_pips=execution.cost_pips,
         session=session,
         regime=regime,
         technical_score=technical_score,
