@@ -1,17 +1,14 @@
 """Walk-forward / out-of-sample evaluation harness for the rules-based scanner.
 
-The single most important guarantee of this module is **temporal hygiene**:
+The harness enforces two distinct integrity guarantees:
 
-* Every tunable parameter (here, the minimum ``final_score`` threshold) is chosen
-  using *only* the in-sample fold.
-* Every reported metric is computed using *only* the out-of-sample fold, after
-  applying the in-sample-selected threshold.
+* temporal hygiene: tuning uses only the in-sample segment of each fold;
+* sample hygiene: overlapping out-of-sample windows contribute each realized
+  trade exactly once to aggregate metrics, equity, and exported registries.
 
-This makes the aggregated out-of-sample equity an honest estimate of forward
-performance, free of the in-sample optimisation bias that plagues single-window
-backtests. The harness reuses the existing :class:`~app.backtest.engine.Backtester`
-(via an injectable ``segment_runner``) and :func:`~app.backtest.metrics.calculate_metrics`,
-so scan/backtest parity is preserved.
+Per-fold diagnostics intentionally retain their original records. The canonical
+aggregate keeps the first occurrence from the earliest fold, keyed by
+``(symbol, entry_time)``.
 
 Paper/demo only: nothing here sends orders.
 """
@@ -79,7 +76,7 @@ class FoldResult:
 
 @dataclass(frozen=True)
 class WalkForwardReport:
-    """Aggregated walk-forward result built only from out-of-sample folds."""
+    """Walk-forward result with a canonical, de-duplicated OOS aggregate."""
 
     config: WalkForwardConfig
     symbols: list[str]
@@ -93,10 +90,7 @@ class WalkForwardReport:
 
 
 class SegmentRunner(Protocol):
-    """Runs a backtest over one date segment and returns its result.
-
-    The real implementation wraps :meth:`Backtester.run`; tests can inject a stub.
-    """
+    """Runs a backtest over one date segment and returns its result."""
 
     def __call__(
         self,
@@ -106,6 +100,12 @@ class SegmentRunner(Protocol):
         start: datetime,
         end: datetime,
     ) -> BacktestResult: ...
+
+
+class RunnerFactory(Protocol):
+    """Picklable factory that builds a :class:`SegmentRunner` in a worker."""
+
+    def __call__(self) -> SegmentRunner: ...
 
 
 def generate_windows(start: datetime, end: datetime, config: WalkForwardConfig) -> list[WalkForwardWindow]:
@@ -142,10 +142,9 @@ def select_min_score(
 ) -> tuple[float, float]:
     """Pick the threshold maximising in-sample expectancy.
 
-    Returns ``(selected_min_score, in_sample_expectancy)``. Only thresholds that
-    retain at least ``min_in_sample_trades`` trades are eligible; ties are broken
-    in favour of the *higher* threshold (fewer, more selective trades). If no
-    threshold qualifies, the lowest grid value is returned with its expectancy.
+    Only thresholds retaining at least ``min_in_sample_trades`` are eligible.
+    Ties prefer the higher threshold. If no threshold qualifies, the lowest grid
+    value is returned with the expectancy of the retained sample.
     """
 
     ordered_grid = sorted(score_grid)
@@ -158,7 +157,6 @@ def select_min_score(
         if len(retained) < min_in_sample_trades:
             continue
         expectancy = sum(trade.net_r for trade in retained) / len(retained)
-        # >= keeps the higher threshold on ties because the grid is ascending.
         if expectancy >= best_expectancy:
             best_expectancy = expectancy
             best_threshold = threshold
@@ -177,14 +175,16 @@ def evaluate_fold(
     out_of_sample_trades: list[TradeRecord],
     config: WalkForwardConfig,
 ) -> FoldResult:
-    """Tune on in-sample trades, then score out-of-sample trades with that threshold."""
+    """Tune on in-sample trades, then filter the out-of-sample fold."""
 
     selected, in_sample_expectancy = select_min_score(
-        in_sample_trades, config.score_grid, config.min_in_sample_trades
+        in_sample_trades,
+        config.score_grid,
+        config.min_in_sample_trades,
     )
     eligible_in_sample = [trade for trade in in_sample_trades if _passes(trade, selected)]
     retained_oos = [trade for trade in out_of_sample_trades if _passes(trade, selected)]
-    retained_oos.sort(key=lambda trade: trade.exit_time)
+    retained_oos.sort(key=_chronological_trade_key)
     return FoldResult(
         window=window,
         selected_min_score=selected,
@@ -196,36 +196,6 @@ def evaluate_fold(
     )
 
 
-def _evaluate_single_fold(
-    segment_runner: SegmentRunner,
-    window: WalkForwardWindow,
-    symbols: list[str],
-    style: TradingStyle,
-    setup_filter: SetupFamily | Literal["all"],
-    config: WalkForwardConfig,
-) -> FoldResult:
-    """Run one fold: in-sample tuning + out-of-sample evaluation.
-
-    Shared by the sequential (:func:`run_walk_forward`) and parallel
-    (:func:`run_walk_forward_parallel`) paths so a fold is computed identically
-    regardless of how it is scheduled.
-
-    The in-sample and out-of-sample windows share the boundary instant
-    (``out_of_sample_start == in_sample_end``). The Backtester treats date ranges
-    as inclusive on both ends, so the in-sample run ends strictly *before* the
-    boundary bar. The boundary bar then belongs only to the out-of-sample segment:
-    train and test ranges are disjoint by construction.
-    """
-    in_sample_end_exclusive = window.in_sample_end - timedelta(microseconds=1)
-    in_sample_result = segment_runner(
-        symbols, style, setup_filter, window.in_sample_start, in_sample_end_exclusive
-    )
-    oos_result = segment_runner(
-        symbols, style, setup_filter, window.out_of_sample_start, window.out_of_sample_end
-    )
-    return evaluate_fold(window, in_sample_result.trades, oos_result.trades, config)
-
-
 def run_walk_forward(
     segment_runner: SegmentRunner,
     symbols: list[str],
@@ -235,32 +205,21 @@ def run_walk_forward(
     end: datetime,
     config: WalkForwardConfig,
 ) -> WalkForwardReport:
-    """Run the full walk-forward analysis over ``[start, end]``.
-
-    For each fold the ``segment_runner`` is invoked twice: once for the in-sample
-    segment (tuning) and once for the out-of-sample segment (evaluation). The two
-    calls use disjoint date ranges, so out-of-sample data can never influence the
-    threshold choice.
-    """
+    """Run sequential walk-forward analysis with canonical OOS aggregation."""
 
     windows = generate_windows(start, end, config)
-    folds: list[FoldResult] = [
-        _evaluate_single_fold(segment_runner, window, symbols, style, setup_filter, config)
+    folds = [
+        _evaluate_single_fold(
+            segment_runner,
+            window,
+            symbols,
+            style,
+            setup_filter,
+            config,
+        )
         for window in windows
     ]
-
-    aggregate_trades: list[TradeRecord] = []
-    for fold in folds:
-        aggregate_trades.extend(fold.oos_trade_records)
-    aggregate_trades.sort(key=lambda trade: trade.exit_time)
-
-    equity_curve: list[tuple[datetime, float]] = [(start, 0.0)]
-    cumulative = 0.0
-    for trade in aggregate_trades:
-        cumulative += trade.net_r
-        equity_curve.append((trade.exit_time, round(cumulative, 4)))
-
-    return WalkForwardReport(
+    return _assemble_report(
         config=config,
         symbols=symbols,
         style=style,
@@ -268,15 +227,74 @@ def run_walk_forward(
         start=start,
         end=end,
         folds=folds,
-        aggregate_metrics=calculate_metrics(aggregate_trades),
-        oos_equity_curve=equity_curve,
     )
+
+
+def run_walk_forward_parallel(
+    settings: "AppSettings | None",
+    symbols: list[str],
+    style: TradingStyle,
+    setup_filter: SetupFamily | Literal["all"],
+    start: datetime,
+    end: datetime,
+    config: WalkForwardConfig,
+    *,
+    n_jobs: int,
+    runner_factory: RunnerFactory | None = None,
+) -> WalkForwardReport:
+    """Run walk-forward folds in parallel with deterministic reassembly."""
+
+    if n_jobs < 1:
+        raise ValueError("n_jobs must be at least 1")
+    if runner_factory is None:
+        if settings is None:
+            raise ValueError("settings is required when runner_factory is not provided")
+        runner_factory = _BacktesterRunnerFactory(settings)
+
+    tasks = [
+        _FoldTask(
+            window=window,
+            symbols=tuple(symbols),
+            style=style,
+            setup_filter=setup_filter,
+            config=config,
+            runner_factory=runner_factory,
+        )
+        for window in generate_windows(start, end, config)
+    ]
+    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        fold_results = list(executor.map(_fold_worker, tasks))
+
+    folds = sorted(fold_results, key=lambda fold: fold.window.fold_index)
+    return _assemble_report(
+        config=config,
+        symbols=list(symbols),
+        style=style,
+        setup_filter=setup_filter,
+        start=start,
+        end=end,
+        folds=folds,
+    )
+
+
+def deduplicated_oos_trades(report: WalkForwardReport) -> list[TradeRecord]:
+    """Return the canonical OOS sample used by aggregate metrics and exports."""
+
+    return _deduplicate_fold_trades(report.folds)
+
+
+def raw_oos_trade_count(report: WalkForwardReport) -> int:
+    """Count OOS records before overlap de-duplication."""
+
+    return sum(len(fold.oos_trade_records) for fold in report.folds)
 
 
 def report_to_dict(report: WalkForwardReport) -> dict[str, object]:
     """Serialise a walk-forward report to a JSON-friendly dictionary."""
 
     setup_filter = report.setup_filter if isinstance(report.setup_filter, str) else report.setup_filter.value
+    raw_count = raw_oos_trade_count(report)
+    unique_count = report.aggregate_metrics.number_of_trades
     return {
         "config": {
             "in_sample_days": report.config.in_sample_days,
@@ -292,9 +310,12 @@ def report_to_dict(report: WalkForwardReport) -> dict[str, object]:
         "end": report.end.isoformat(),
         "fold_count": len(report.folds),
         "out_of_sample": {
-            "total_trades": report.aggregate_metrics.number_of_trades,
+            "total_trades": unique_count,
+            "raw_fold_trade_records": raw_count,
+            "duplicates_removed": raw_count - unique_count,
+            "aggregation": "deduplicated_by_symbol_entry_time_first_fold_wins",
             "metrics": _metrics_to_dict(report.aggregate_metrics),
-            "equity_curve": [[ts.isoformat(), value] for ts, value in report.oos_equity_curve],
+            "equity_curve": [[timestamp.isoformat(), value] for timestamp, value in report.oos_equity_curve],
         },
         "folds": [
             {
@@ -319,6 +340,8 @@ def report_to_text(report: WalkForwardReport) -> str:
 
     setup_filter = report.setup_filter if isinstance(report.setup_filter, str) else report.setup_filter.value
     aggregate = report.aggregate_metrics
+    raw_count = raw_oos_trade_count(report)
+    unique_count = aggregate.number_of_trades
     lines = [
         "Walk-Forward / Out-of-Sample Report (paper-only)",
         "================================================",
@@ -331,14 +354,16 @@ def report_to_text(report: WalkForwardReport) -> str:
         f"score_grid        : {', '.join(f'{value:g}' for value in report.config.score_grid)}",
         f"folds             : {len(report.folds)}",
         "",
-        "Aggregated OUT-OF-SAMPLE performance (thresholds tuned in-sample only):",
-        f"  trades          : {aggregate.number_of_trades}",
+        "Canonical OUT-OF-SAMPLE performance (unique trades; thresholds tuned in-sample only):",
+        f"  trades unique   : {unique_count}",
+        f"  raw fold records: {raw_count}",
+        f"  duplicates      : {raw_count - unique_count}",
         f"  expectancy/trade: {aggregate.expectancy:.4f} R",
         f"  win_rate        : {aggregate.win_rate:.2f}%",
         f"  profit_factor   : {aggregate.profit_factor:.4f}",
         f"  max_drawdown    : {aggregate.max_drawdown:.4f} R",
         "",
-        "Per-fold breakdown:",
+        "Per-fold breakdown (overlapping windows may repeat trades here):",
     ]
     for fold in report.folds:
         oos = fold.out_of_sample_metrics
@@ -354,30 +379,8 @@ def report_to_text(report: WalkForwardReport) -> str:
     return "\n".join(lines) + "\n"
 
 
-def deduplicated_oos_trades(report: WalkForwardReport) -> list[TradeRecord]:
-    """Return each out-of-sample trade exactly once.
-
-    Because ``step`` (e.g. 14 d) can be shorter than ``out_of_sample`` (e.g. 21 d),
-    consecutive OOS windows overlap and a trade can appear in several folds. We
-    keep the first occurrence (earliest fold) keyed by ``(symbol, entry_time)``,
-    so the aggregate is an honest, non-double-counted sample.
-    """
-
-    seen: set[tuple[str, object]] = set()
-    unique: list[TradeRecord] = []
-    for fold in report.folds:
-        for trade in fold.oos_trade_records:
-            key = (trade.symbol, trade.entry_time)
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(trade)
-    unique.sort(key=lambda trade: (trade.entry_time, trade.symbol))
-    return unique
-
-
 def oos_registry_rows(report: WalkForwardReport) -> list[dict[str, object]]:
-    """Build the deduplicated OOS trade registry (one row per unique trade)."""
+    """Build the canonical OOS trade registry, one row per unique trade."""
 
     rows: list[dict[str, object]] = []
     for trade in deduplicated_oos_trades(report):
@@ -396,12 +399,7 @@ def oos_registry_rows(report: WalkForwardReport) -> list[dict[str, object]]:
 
 
 def write_oos_registry(report: WalkForwardReport, path: Path) -> Path:
-    """Write the deduplicated OOS trade registry as CSV.
-
-    Columns: ``pair, timestamp, score, gross_r, net_r, exit_reason``. This is the
-    single artifact consumed downstream (edge_decomposition, calibration) so no
-    re-backtest is ever needed.
-    """
+    """Write the canonical OOS registry as CSV."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = oos_registry_rows(report)
@@ -414,20 +412,19 @@ def write_oos_registry(report: WalkForwardReport, path: Path) -> Path:
 
 
 def write_reports(report: WalkForwardReport, output_dir: Path) -> dict[str, Path]:
-    """Write ``walk_forward.json``, ``walk_forward.txt`` and the dedup OOS registry."""
+    """Write JSON/TXT reports and the same canonical OOS registry they summarize."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
     json_path = output_dir / "walk_forward.json"
     text_path = output_dir / "walk_forward.txt"
     registry_path = output_dir / "oos_trade_registry.csv"
-    json_path.write_text(json.dumps(report_to_dict(report), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    json_path.write_text(
+        json.dumps(report_to_dict(report), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     text_path.write_text(report_to_text(report), encoding="utf-8")
     write_oos_registry(report, registry_path)
     return {"json": json_path, "txt": text_path, "registry": registry_path}
-
-
-def _metrics_to_dict(metrics: BacktestMetrics) -> dict[str, object]:
-    return metrics.model_dump()
 
 
 def backtester_segment_runner(backtester) -> SegmentRunner:  # noqa: ANN001 - avoid import cycle
@@ -445,51 +442,98 @@ def backtester_segment_runner(backtester) -> SegmentRunner:  # noqa: ANN001 - av
     return _run
 
 
+def _evaluate_single_fold(
+    segment_runner: SegmentRunner,
+    window: WalkForwardWindow,
+    symbols: list[str],
+    style: TradingStyle,
+    setup_filter: SetupFamily | Literal["all"],
+    config: WalkForwardConfig,
+) -> FoldResult:
+    """Run one fold with a strictly disjoint IS/OOS boundary."""
+
+    in_sample_end_exclusive = window.in_sample_end - timedelta(microseconds=1)
+    in_sample_result = segment_runner(
+        symbols,
+        style,
+        setup_filter,
+        window.in_sample_start,
+        in_sample_end_exclusive,
+    )
+    oos_result = segment_runner(
+        symbols,
+        style,
+        setup_filter,
+        window.out_of_sample_start,
+        window.out_of_sample_end,
+    )
+    return evaluate_fold(window, in_sample_result.trades, oos_result.trades, config)
+
+
+def _assemble_report(
+    *,
+    config: WalkForwardConfig,
+    symbols: list[str],
+    style: TradingStyle,
+    setup_filter: SetupFamily | Literal["all"],
+    start: datetime,
+    end: datetime,
+    folds: list[FoldResult],
+) -> WalkForwardReport:
+    """Build all aggregate artifacts from one canonical OOS trade sample."""
+
+    canonical_trades = _deduplicate_fold_trades(folds)
+    equity_curve: list[tuple[datetime, float]] = [(start, 0.0)]
+    cumulative = 0.0
+    for trade in canonical_trades:
+        cumulative += trade.net_r
+        equity_curve.append((trade.exit_time, round(cumulative, 4)))
+
+    return WalkForwardReport(
+        config=config,
+        symbols=list(symbols),
+        style=style,
+        setup_filter=setup_filter,
+        start=start,
+        end=end,
+        folds=folds,
+        aggregate_metrics=calculate_metrics(canonical_trades),
+        oos_equity_curve=equity_curve,
+    )
+
+
+def _deduplicate_fold_trades(folds: list[FoldResult]) -> list[TradeRecord]:
+    """Keep the earliest-fold occurrence, then order trades by realized chronology."""
+
+    seen: set[tuple[str, datetime]] = set()
+    unique: list[TradeRecord] = []
+    for fold in sorted(folds, key=lambda item: item.window.fold_index):
+        for trade in fold.oos_trade_records:
+            key = (trade.symbol, trade.entry_time)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(trade)
+    unique.sort(key=_chronological_trade_key)
+    return unique
+
+
+def _chronological_trade_key(trade: TradeRecord) -> tuple[datetime, str, datetime]:
+    return trade.exit_time, trade.symbol, trade.entry_time
+
+
 def _passes(trade: TradeRecord, threshold: float) -> bool:
     if threshold <= 0.0:
         return True
     return trade.final_score is not None and trade.final_score >= threshold
 
 
-# ---------------------------------------------------------------------------
-# Parallel walk-forward  (--jobs N)
-# ---------------------------------------------------------------------------
-#
-# Parallelisable unit:  one fold = one WalkForwardWindow. Folds are mutually
-# independent — each runs its own in-sample + out-of-sample backtests and tunes
-# its threshold using ONLY its own in-sample fold (no cross-fold state).
-#
-# Centralised (must NOT move into workers): the final reassembly. Folds are
-# sorted into the canonical order (fold_index) on the parent process before
-# aggregation; the aggregate trade pool is then sorted by exit_time exactly as
-# the sequential path does. This makes every downstream figure — dedup, equity
-# curve, aggregate metrics and bootstrap IC — independent of worker finish order.
-#
-# The threshold selection here is per-fold (in-sample only), so it already lives
-# inside each worker. It is NOT a global inter-symbol selection, so nothing about
-# it needs to be hoisted to the parent.
-
-
-class RunnerFactory(Protocol):
-    """Picklable factory that builds a :class:`SegmentRunner` inside a worker.
-
-    A *factory* (rather than a ready-made runner) is sent across the process
-    boundary because :class:`~app.backtest.engine.Backtester` instances and their
-    providers are not meant to be pickled and shared; instead each worker builds
-    its own, reading its own data locally (minimal IPC, no large DataFrames on
-    the wire).
-    """
-
-    def __call__(self) -> SegmentRunner: ...
+def _metrics_to_dict(metrics: BacktestMetrics) -> dict[str, object]:
+    return metrics.model_dump()
 
 
 class _BacktesterRunnerFactory:
-    """Default factory: build a fresh provider + :class:`Backtester` per worker.
-
-    Holds only the (picklable) :class:`AppSettings`. Each worker process calls
-    ``build_provider(settings)`` and constructs its own backtester, so no heavy
-    state crosses the process boundary.
-    """
+    """Build a fresh provider and backtester inside each process."""
 
     def __init__(self, settings: "AppSettings") -> None:
         self._settings = settings
@@ -505,7 +549,7 @@ class _BacktesterRunnerFactory:
 
 @dataclass(frozen=True)
 class _FoldTask:
-    """Serialisable work unit passed to each ProcessPoolExecutor worker."""
+    """Serializable work unit passed to a process worker."""
 
     window: WalkForwardWindow
     symbols: tuple[str, ...]
@@ -516,90 +560,12 @@ class _FoldTask:
 
 
 def _fold_worker(task: _FoldTask) -> FoldResult:
-    """Top-level (picklable) entry point executed inside each worker process."""
     runner = task.runner_factory()
     return _evaluate_single_fold(
-        runner, task.window, list(task.symbols), task.style, task.setup_filter, task.config
-    )
-
-
-def run_walk_forward_parallel(
-    settings: "AppSettings | None",
-    symbols: list[str],
-    style: TradingStyle,
-    setup_filter: SetupFamily | Literal["all"],
-    start: datetime,
-    end: datetime,
-    config: WalkForwardConfig,
-    *,
-    n_jobs: int,
-    runner_factory: RunnerFactory | None = None,
-) -> WalkForwardReport:
-    """Walk-forward using *n_jobs* worker processes.
-
-    Produces results **rigorously identical** to :func:`run_walk_forward`
-    (``--jobs 1``): parallelisation changes only scheduling, never computation.
-    Folds are sorted into canonical order (``fold_index``) on the parent process
-    before aggregation, so the dedup, equity curve, aggregate metrics and
-    bootstrap IC are independent of which worker finishes first.
-
-    Parameters
-    ----------
-    settings:
-        Full application settings (picklable pydantic model) used to build the
-        default per-worker backtester. May be ``None`` only when an explicit
-        ``runner_factory`` is supplied (e.g. in tests).
-    n_jobs:
-        Number of worker processes (>= 1).
-    runner_factory:
-        Optional picklable factory overriding the default settings-based
-        backtester construction. Each worker calls it to obtain its own
-        :class:`SegmentRunner`.
-    """
-    if runner_factory is None:
-        if settings is None:
-            raise ValueError("settings is required when runner_factory is not provided")
-        runner_factory = _BacktesterRunnerFactory(settings)
-
-    windows = generate_windows(start, end, config)
-    tasks = [
-        _FoldTask(
-            window=window,
-            symbols=tuple(symbols),
-            style=style,
-            setup_filter=setup_filter,
-            config=config,
-            runner_factory=runner_factory,
-        )
-        for window in windows
-    ]
-
-    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
-        fold_results = list(executor.map(_fold_worker, tasks))
-
-    # Canonical reassembly — deterministic regardless of worker completion order.
-    folds = sorted(fold_results, key=lambda f: f.window.fold_index)
-
-    # Aggregation below is byte-for-byte identical to run_walk_forward.
-    aggregate_trades: list[TradeRecord] = []
-    for fold in folds:
-        aggregate_trades.extend(fold.oos_trade_records)
-    aggregate_trades.sort(key=lambda trade: trade.exit_time)
-
-    equity_curve: list[tuple[datetime, float]] = [(start, 0.0)]
-    cumulative = 0.0
-    for trade in aggregate_trades:
-        cumulative += trade.net_r
-        equity_curve.append((trade.exit_time, round(cumulative, 4)))
-
-    return WalkForwardReport(
-        config=config,
-        symbols=list(symbols),
-        style=style,
-        setup_filter=setup_filter,
-        start=start,
-        end=end,
-        folds=folds,
-        aggregate_metrics=calculate_metrics(aggregate_trades),
-        oos_equity_curve=equity_curve,
+        runner,
+        task.window,
+        list(task.symbols),
+        task.style,
+        task.setup_filter,
+        task.config,
     )
