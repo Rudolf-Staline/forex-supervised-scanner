@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from app.backtest.metrics import calculate_metrics
@@ -58,7 +59,7 @@ class PortfolioWalkForwardReport:
         return self.portfolio.metrics
 
     @property
-    def oos_equity_curve(self) -> list[tuple[object, float]]:
+    def oos_equity_curve(self) -> list[tuple[datetime, float]]:
         """Realized portfolio equity, including the zero starting point."""
 
         return [(self.candidate_report.start, 0.0), *self.portfolio.equity_curve]
@@ -167,7 +168,7 @@ def portfolio_report_to_text(report: PortfolioWalkForwardReport) -> str:
         f"  expectancy 95% CI        : [{report.portfolio.metrics.expectancy_ci_low:.4f}, "
         f"{report.portfolio.metrics.expectancy_ci_high:.4f}] R",
         "",
-        "Per-fold diagnostics remain in the source walk-forward report and are not",
+        "Per-fold candidate diagnostics remain embedded in the JSON payload and are not",
         "portfolio-constrained; only the canonical cross-fold OOS sample is allocated.",
     ]
     return "\n".join(lines) + "\n"
