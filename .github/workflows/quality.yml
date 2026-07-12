@@ -46,6 +46,8 @@ jobs:
           import sys
 
           tests = [
+              "tests/test_walk_forward.py",
+              "tests/test_walk_forward_parallel.py",
               "tests/test_autonomous_supervisor.py",
               "tests/test_safety.py",
               "tests/test_demo_bot.py",
@@ -62,14 +64,14 @@ jobs:
               "tests/test_paper_session_history.py",
               "tests/test_paper_session_trends.py",
           ]
-          existing = [t for t in tests if Path(t).exists()]
+          existing = [test for test in tests if Path(test).exists()]
           print("Running tests:", existing)
           if not existing:
               print("No cloud-safe tests found; skipping.")
               raise SystemExit(0)
 
-          cmd = [sys.executable, "-m", "pytest", "-q", *existing, "--maxfail=1"]
-          raise SystemExit(subprocess.call(cmd))
+          command = [sys.executable, "-m", "pytest", "-q", *existing, "--maxfail=1"]
+          raise SystemExit(subprocess.call(command))
           PY
 
   web:
