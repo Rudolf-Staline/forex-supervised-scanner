@@ -1,0 +1,43 @@
+name: Shadow Labeling Tests
+
+on:
+  pull_request:
+    paths:
+      - "apps/forex-scanner/app/ml/shadow_labeling.py"
+      - "apps/forex-scanner/scripts/build_shadow_labels.py"
+      - "apps/forex-scanner/tests/test_shadow_labeling.py"
+      - "apps/forex-scanner/docs/shadow_labeling.md"
+      - ".github/workflows/shadow-labeling-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/forex-scanner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: apps/forex-scanner/pyproject.toml
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+
+      - name: Run shadow labeling tests
+        run: |
+          python -m pytest -q tests/test_shadow_labeling.py --maxfail=1
+          python -m pytest -q tests/test_execution_simulator.py --maxfail=1
+          python -m pytest -q tests/test_decision_dataset.py --maxfail=1
+          python -m py_compile \
+            app/ml/shadow_labeling.py \
+            scripts/build_shadow_labels.py
