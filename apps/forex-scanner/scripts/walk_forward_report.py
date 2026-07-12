@@ -1,7 +1,9 @@
 """Walk-forward / out-of-sample backtest report. Reporting only; no orders are sent.
 
-Thresholds are tuned exclusively on each in-sample fold and the reported metrics
-come exclusively from the out-of-sample folds, giving an honest forward estimate.
+Thresholds are tuned exclusively on each in-sample fold. By default, the
+canonical de-duplicated OOS candidates are then passed through portfolio
+constraints before headline metrics are published. Use ``--no-portfolio`` only
+for candidate-level diagnostics or historical reproducibility.
 """
 
 from __future__ import annotations
@@ -18,6 +20,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.backtest.engine import Backtester
+from app.backtest.portfolio import PortfolioConstraints
+from app.backtest.portfolio_walk_forward import (
+    apply_portfolio_constraints,
+    portfolio_report_to_text,
+    write_portfolio_walk_forward_reports,
+)
 from app.backtest.walk_forward import (
     WalkForwardConfig,
     backtester_segment_runner,
@@ -34,30 +42,7 @@ from app.data.providers import build_provider
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Walk-forward backtest. Reporting only; no orders are sent.")
-    parser.add_argument("--provider", default="synthetic", choices=["synthetic", "auto", "mt5", "csv"])
-    parser.add_argument("--watchlist", default=None, choices=watchlist_names())
-    parser.add_argument("--symbols", nargs="+", default=None, help="Explicit symbols. Overrides --watchlist.")
-    parser.add_argument("--style", default=TradingStyle.DAY_TRADING.value, choices=[style.value for style in TradingStyle])
-    parser.add_argument("--setup", default="all", help="Setup family filter or 'all'.")
-    parser.add_argument("--from-date", default=None, help="UTC start date, e.g. 2026-01-01.")
-    parser.add_argument("--to-date", default=None, help="UTC end date, e.g. 2026-06-01.")
-    parser.add_argument("--in-sample-days", type=int, default=45)
-    parser.add_argument("--out-of-sample-days", type=int, default=15)
-    parser.add_argument("--step-days", type=int, default=15)
-    parser.add_argument("--score-grid", default="0,55,60,65,70,75,80", help="Comma-separated min-score candidates.")
-    parser.add_argument("--min-in-sample-trades", type=int, default=5)
-    parser.add_argument("--output-dir", default=str(PROJECT_ROOT / "reports"))
-    parser.add_argument(
-        "--jobs",
-        type=int,
-        default=None,
-        metavar="N",
-        help=(
-            "Parallel worker processes for the walk-forward folds "
-            "(default: all CPU cores; --jobs 1 uses the exact sequential path)."
-        ),
-    )
+    parser = _build_parser()
     args = parser.parse_args()
 
     load_dotenv()
@@ -78,10 +63,8 @@ def main() -> None:
         score_grid=score_grid,
         min_in_sample_trades=args.min_in_sample_trades,
     )
-
     n_jobs = args.jobs if args.jobs is not None else (os.cpu_count() or 1)
 
-    # database=None: walk-forward runs many short segments; we do not persist them.
     provider = build_provider(settings)
     backtester = Backtester(settings, provider, database=None)
     runner = backtester_segment_runner(backtester)
@@ -89,24 +72,125 @@ def main() -> None:
     print(
         "walk_forward "
         f"provider={provider.name} style={style.value} symbols={','.join(symbols)} "
-        f"from={start.date()} to={end.date()} is={config.in_sample_days}d oos={config.out_of_sample_days}d "
-        f"step={config.step_days}d setup={args.setup} jobs={n_jobs}"
+        f"from={start.date()} to={end.date()} is={config.in_sample_days}d "
+        f"oos={config.out_of_sample_days}d step={config.step_days}d "
+        f"setup={args.setup} jobs={n_jobs} portfolio={args.portfolio}"
     )
-    print("warning=Walk-forward backtest; resultats passes sans garantie de performance future; aucune execution broker.")
+    print(
+        "warning=Walk-forward backtest; resultats passes sans garantie de performance future; "
+        "aucune execution broker."
+    )
 
     if n_jobs == 1:
-        # Exact sequential path — guaranteed identical to the pre-registered baseline.
         report = run_walk_forward(runner, symbols, style, setup_filter, start, end, config)
     else:
-        # Parallel path — each worker creates its own provider/backtester; results
-        # are sorted canonically before aggregation so output is identical to --jobs 1.
-        report = run_walk_forward_parallel(settings, symbols, style, setup_filter, start, end, config, n_jobs=n_jobs)
+        report = run_walk_forward_parallel(
+            settings,
+            symbols,
+            style,
+            setup_filter,
+            start,
+            end,
+            config,
+            n_jobs=n_jobs,
+        )
 
-    outputs = write_reports(report, Path(args.output_dir))
-    print(report_to_text(report))
-    print(f"json_export={outputs['json']}")
-    print(f"txt_export={outputs['txt']}")
-    print(f"registry_export={outputs['registry']}")
+    output_dir = Path(args.output_dir)
+    if args.portfolio:
+        constraints = _portfolio_constraints(args)
+        portfolio_report = apply_portfolio_constraints(report, constraints)
+        outputs = write_portfolio_walk_forward_reports(portfolio_report, output_dir)
+        print(portfolio_report_to_text(portfolio_report))
+    else:
+        outputs = write_reports(report, output_dir)
+        print(report_to_text(report))
+        print(
+            "warning=Portfolio constraints disabled; headline metrics describe canonical "
+            "candidates, not an attainable multi-pair allocation."
+        )
+
+    for label, path in outputs.items():
+        print(f"{label}_export={path}")
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Walk-forward backtest. Reporting only; no orders are sent."
+    )
+    parser.add_argument("--provider", default="synthetic", choices=["synthetic", "auto", "mt5", "csv"])
+    parser.add_argument("--watchlist", default=None, choices=watchlist_names())
+    parser.add_argument("--symbols", nargs="+", default=None, help="Explicit symbols. Overrides --watchlist.")
+    parser.add_argument(
+        "--style",
+        default=TradingStyle.DAY_TRADING.value,
+        choices=[style.value for style in TradingStyle],
+    )
+    parser.add_argument("--setup", default="all", help="Setup family filter or 'all'.")
+    parser.add_argument("--from-date", default=None, help="UTC start date, e.g. 2026-01-01.")
+    parser.add_argument("--to-date", default=None, help="UTC end date, e.g. 2026-06-01.")
+    parser.add_argument("--in-sample-days", type=int, default=45)
+    parser.add_argument("--out-of-sample-days", type=int, default=15)
+    parser.add_argument("--step-days", type=int, default=15)
+    parser.add_argument(
+        "--score-grid",
+        default="0,55,60,65,70,75,80",
+        help="Comma-separated min-score candidates.",
+    )
+    parser.add_argument("--min-in-sample-trades", type=int, default=5)
+    parser.add_argument("--output-dir", default=str(PROJECT_ROOT / "reports"))
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Parallel worker processes for the walk-forward folds "
+            "(default: all CPU cores; --jobs 1 uses the exact sequential path)."
+        ),
+    )
+
+    portfolio_group = parser.add_mutually_exclusive_group()
+    portfolio_group.add_argument(
+        "--portfolio",
+        dest="portfolio",
+        action="store_true",
+        default=True,
+        help="Publish portfolio-constrained headline OOS metrics (default).",
+    )
+    portfolio_group.add_argument(
+        "--no-portfolio",
+        dest="portfolio",
+        action="store_false",
+        help="Publish candidate-level OOS metrics without multi-pair allocation.",
+    )
+    parser.add_argument("--max-concurrent-positions", type=int, default=3)
+    parser.add_argument("--max-same-symbol-positions", type=int, default=1)
+    parser.add_argument("--max-abs-currency-exposure", type=int, default=2)
+    parser.add_argument("--daily-loss-limit-r", type=float, default=3.0)
+    parser.add_argument(
+        "--disable-currency-exposure-limit",
+        action="store_true",
+        help="Disable the signed per-currency exposure cap.",
+    )
+    parser.add_argument(
+        "--disable-daily-loss-limit",
+        action="store_true",
+        help="Disable the realized daily-loss lockout.",
+    )
+    return parser
+
+
+def _portfolio_constraints(args: argparse.Namespace) -> PortfolioConstraints:
+    return PortfolioConstraints(
+        max_concurrent_positions=args.max_concurrent_positions,
+        max_same_symbol_positions=args.max_same_symbol_positions,
+        max_abs_currency_exposure=(
+            None
+            if args.disable_currency_exposure_limit
+            else args.max_abs_currency_exposure
+        ),
+        daily_loss_limit_r=(None if args.disable_daily_loss_limit else args.daily_loss_limit_r),
+    )
 
 
 def _parse_setup_filter(value: str) -> SetupFamily | str:
