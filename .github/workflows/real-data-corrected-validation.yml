@@ -1,0 +1,340 @@
+name: Corrected Real-Data Validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/real-data-corrected-validation.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: corrected-real-data-validation
+  cancel-in-progress: false
+
+env:
+  FROM_DATE: "2016-01-01"
+  TO_DATE: "2024-01-01"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  fetch-bars:
+    name: Fetch ${{ matrix.code }} bid/ask bars
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - symbol: EUR/USD
+            code: EURUSD
+          - symbol: GBP/USD
+            code: GBPUSD
+          - symbol: USD/JPY
+            code: USDJPY
+          - symbol: USD/CHF
+            code: USDCHF
+          - symbol: AUD/USD
+            code: AUDUSD
+          - symbol: USD/CAD
+            code: USDCAD
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: apps/forex-scanner/pyproject.toml
+
+      - name: Install acquisition dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e apps/forex-scanner
+          python -m pip install "dukascopy-python>=4,<5"
+
+      - name: Restore cached bars
+        id: cache-bars
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/forex-scanner/data/real/${{ matrix.code }}_H1.csv
+            apps/forex-scanner/data/real/${{ matrix.code }}_M15.csv
+            apps/forex-scanner/data/real/${{ matrix.code }}_M5.csv
+          key: dukascopy-bidask-${{ matrix.code }}-${{ env.FROM_DATE }}-${{ env.TO_DATE }}-v1
+
+      - name: Fetch real Dukascopy bars
+        if: steps.cache-bars.outputs.cache-hit != 'true'
+        working-directory: apps/forex-scanner
+        env:
+          SYMBOL: ${{ matrix.symbol }}
+          CODE: ${{ matrix.code }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f "data/real/${CODE}_H1.csv" "data/real/${CODE}_M15.csv" "data/real/${CODE}_M5.csv"
+          success=0
+          for attempt in 1 2 3; do
+            echo "Dukascopy fetch attempt ${attempt}/3 for ${SYMBOL}"
+            if python scripts/fetch_real_data.py \
+              --source dukascopy \
+              --symbols "${SYMBOL}" \
+              --timeframes H1 M15 M5 \
+              --from-date "${FROM_DATE}" \
+              --to-date "${TO_DATE}" \
+              --out-dir data/real \
+              --verbose; then
+              success=1
+              break
+            fi
+            sleep $((attempt * 30))
+          done
+          test "${success}" -eq 1
+
+      - name: Validate fetched bars
+        env:
+          CODE: ${{ matrix.code }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import pandas as pd
+
+          code = os.environ["CODE"]
+          root = Path("apps/forex-scanner/data/real")
+          required = [root / f"{code}_{tf}.csv" for tf in ("H1", "M15", "M5")]
+          for path in required:
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise SystemExit(f"missing or empty real-data file: {path}")
+              frame = pd.read_csv(path)
+              expected = {"timestamp", "open", "high", "low", "close", "volume", "spread"}
+              missing = expected - set(frame.columns.str.lower())
+              if missing:
+                  raise SystemExit(f"{path}: missing columns {sorted(missing)}")
+              if len(frame) < 220:
+                  raise SystemExit(f"{path}: only {len(frame)} rows")
+              print(f"validated {path.name}: rows={len(frame)} bytes={path.stat().st_size}")
+          PY
+
+      - name: Pack symbol bars
+        env:
+          CODE: ${{ matrix.code }}
+        run: |
+          mkdir -p .real-data-artifacts
+          tar -C apps/forex-scanner -czf ".real-data-artifacts/${CODE}.tar.gz" \
+            "data/real/${CODE}_H1.csv" \
+            "data/real/${CODE}_M15.csv" \
+            "data/real/${CODE}_M5.csv"
+
+      - name: Upload temporary symbol bars
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-bars-${{ matrix.code }}
+          path: .real-data-artifacts/${{ matrix.code }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  validate:
+    name: Run corrected multi-pair OOS validation
+    needs: fetch-bars
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: apps/forex-scanner/pyproject.toml
+
+      - name: Install scanner and research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "apps/forex-scanner[dev,ml]"
+
+      - name: Download real-bar artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: real-bars-*
+          path: .real-data-artifacts
+          merge-multiple: true
+
+      - name: Assemble real-data directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find .real-data-artifacts -name '*.tar.gz' | wc -l)" -eq 6
+          for archive in .real-data-artifacts/*.tar.gz; do
+            tar -xzf "${archive}" -C apps/forex-scanner
+          done
+          find apps/forex-scanner/data/real -type f -name '*.csv' -size +0c -print | sort
+          test "$(find apps/forex-scanner/data/real -type f -name '*.csv' -size +0c | wc -l)" -eq 18
+
+      - name: Run corrected portfolio walk-forward
+        working-directory: apps/forex-scanner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports/real-corrected
+          python scripts/walk_forward_report.py \
+            --provider csv \
+            --symbols EUR/USD GBP/USD USD/JPY USD/CHF AUD/USD USD/CAD \
+            --style day_trading \
+            --setup all \
+            --from-date "${FROM_DATE}" \
+            --to-date "${TO_DATE}" \
+            --in-sample-days 45 \
+            --out-of-sample-days 21 \
+            --step-days 14 \
+            --score-grid 0,50,55,60,65,70,75 \
+            --min-in-sample-trades 50 \
+            --threshold-objective conservative_lcb \
+            --shrinkage-trades 50 \
+            --confidence-z 1.645 \
+            --minimum-threshold-objective-r 0 \
+            --portfolio \
+            --max-concurrent-positions 3 \
+            --max-same-symbol-positions 1 \
+            --max-abs-currency-exposure 2 \
+            --daily-loss-limit-r 3 \
+            --output-dir reports/real-corrected \
+            --jobs "$(nproc)" \
+            2>&1 | tee reports/real-corrected/walk_forward_console.log
+
+      - name: Decompose candidate and attainable portfolio samples
+        working-directory: apps/forex-scanner
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_registry="reports/real-corrected/oos_trade_registry.csv"
+          portfolio_registry="reports/real-corrected/portfolio_trade_registry.csv"
+          candidate_rows=$(( $(wc -l < "${candidate_registry}") - 1 ))
+          portfolio_rows=$(( $(wc -l < "${portfolio_registry}") - 1 ))
+          echo "candidate_rows=${candidate_rows}" | tee reports/real-corrected/registry_counts.txt
+          echo "portfolio_rows=${portfolio_rows}" | tee -a reports/real-corrected/registry_counts.txt
+
+          if [ "${candidate_rows}" -gt 0 ]; then
+            mkdir -p reports/real-corrected/candidate-analysis
+            python scripts/edge_decomposition.py \
+              --registry "${candidate_registry}" \
+              --output-dir reports/real-corrected/candidate-analysis \
+              --bootstrap-resamples 5000 \
+              2>&1 | tee reports/real-corrected/candidate_analysis_console.log
+          else
+            echo "No canonical candidates: conservative selector abstained throughout." \
+              | tee reports/real-corrected/candidate_analysis_skipped.txt
+          fi
+
+          if [ "${portfolio_rows}" -gt 0 ]; then
+            mkdir -p reports/real-corrected/portfolio-analysis
+            python scripts/edge_decomposition.py \
+              --registry "${portfolio_registry}" \
+              --output-dir reports/real-corrected/portfolio-analysis \
+              --bootstrap-resamples 5000 \
+              2>&1 | tee reports/real-corrected/portfolio_analysis_console.log
+          else
+            echo "No accepted portfolio trades after constraints." \
+              | tee reports/real-corrected/portfolio_analysis_skipped.txt
+          fi
+
+      - name: Write immutable run manifest
+        working-directory: apps/forex-scanner
+        env:
+          GIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import pandas as pd
+
+          data_root = Path("data/real")
+          report_root = Path("reports/real-corrected")
+
+          def sha256(path: Path) -> str:
+              digest = hashlib.sha256()
+              with path.open("rb") as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              return digest.hexdigest()
+
+          coverage = []
+          for path in sorted(data_root.glob("*.csv")):
+              if path.stat().st_size == 0:
+                  continue
+              frame = pd.read_csv(path, usecols=["timestamp"])
+              coverage.append({
+                  "file": path.name,
+                  "rows": len(frame),
+                  "first_timestamp": str(frame["timestamp"].iloc[0]),
+                  "last_timestamp": str(frame["timestamp"].iloc[-1]),
+                  "sha256": sha256(path),
+              })
+
+          outputs = []
+          for path in sorted(report_root.rglob("*")):
+              if path.is_file():
+                  outputs.append({
+                      "path": str(path.relative_to(report_root)),
+                      "bytes": path.stat().st_size,
+                      "sha256": sha256(path),
+                  })
+
+          manifest = {
+              "schema_version": "real_corrected_validation.v1",
+              "research_only": True,
+              "deployment_authorized": False,
+              "git_sha": os.environ["GIT_SHA"],
+              "github_run_id": os.environ["RUN_ID"],
+              "github_run_attempt": os.environ["RUN_ATTEMPT"],
+              "universe": ["EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD"],
+              "from_date": "2016-01-01",
+              "to_date": "2024-01-01",
+              "walk_forward": {
+                  "in_sample_days": 45,
+                  "out_of_sample_days": 21,
+                  "step_days": 14,
+                  "score_grid": [0, 50, 55, 60, 65, 70, 75],
+                  "threshold_objective": "conservative_lcb",
+                  "minimum_in_sample_trades": 50,
+                  "shrinkage_trades": 50,
+                  "confidence_z": 1.645,
+                  "abstention": True,
+              },
+              "portfolio": {
+                  "max_concurrent_positions": 3,
+                  "max_same_symbol_positions": 1,
+                  "max_abs_currency_exposure": 2,
+                  "daily_loss_limit_r": 3,
+              },
+              "data_coverage": coverage,
+              "outputs": outputs,
+          }
+          target = report_root / "run_manifest.json"
+          target.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          print(f"manifest={target}")
+          PY
+
+      - name: Upload corrected validation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corrected-real-data-validation-${{ github.run_id }}
+          path: apps/forex-scanner/reports/real-corrected
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 6
