@@ -1,0 +1,38 @@
+name: Locked Calendar Holdout Tests
+
+on:
+  pull_request:
+    paths:
+      - "apps/forex-scanner/app/ml/locked_holdout.py"
+      - "apps/forex-scanner/scripts/locked_calendar_holdout.py"
+      - "apps/forex-scanner/tests/test_locked_calendar_holdout.py"
+      - "apps/forex-scanner/docs/locked_calendar_holdout.md"
+      - ".github/workflows/locked-calendar-holdout-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/forex-scanner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: apps/forex-scanner/pyproject.toml
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev,ml]"
+      - name: Run locked holdout tests
+        run: |
+          python -m pytest -q tests/test_locked_calendar_holdout.py --maxfail=1
+          python -m pytest -q tests/test_source_aware_supervised.py --maxfail=1
+          python -m pytest -q tests/test_shadow_labeling.py --maxfail=1
+          python -m py_compile app/ml/locked_holdout.py scripts/locked_calendar_holdout.py
