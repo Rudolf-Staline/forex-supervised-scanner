@@ -115,6 +115,11 @@ def portfolio_report_to_dict(report: PortfolioWalkForwardReport) -> dict[str, ob
         "accepted_trade_keys": [_trade_key(trade) for trade in report.portfolio.accepted_trades],
         "rejections": [_rejection_to_dict(item) for item in report.portfolio.rejected_trades],
     }
+    payload["artifacts"] = {
+        "candidate_registry": "oos_trade_registry.csv",
+        "portfolio_registry": "portfolio_trade_registry.csv",
+        "portfolio_rejections": "portfolio_rejections.csv",
+    }
     return payload
 
 
@@ -170,6 +175,8 @@ def portfolio_report_to_text(report: PortfolioWalkForwardReport) -> str:
         "",
         "Per-fold candidate diagnostics remain embedded in the JSON payload and are not",
         "portfolio-constrained; only the canonical cross-fold OOS sample is allocated.",
+        "Candidate calibration should use oos_trade_registry.csv; attainable portfolio",
+        "edge analysis should use portfolio_trade_registry.csv.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -178,13 +185,13 @@ def write_portfolio_walk_forward_reports(
     report: PortfolioWalkForwardReport,
     output_dir: Path,
 ) -> dict[str, Path]:
-    """Write portfolio headline reports plus accepted, candidate, and rejection CSVs."""
+    """Write portfolio reports and distinct candidate/accepted/rejection registries."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
     json_path = output_dir / "portfolio_walk_forward.json"
     text_path = output_dir / "portfolio_walk_forward.txt"
-    registry_path = output_dir / "oos_trade_registry.csv"
-    candidate_registry_path = output_dir / "oos_candidate_registry.csv"
+    candidate_registry_path = output_dir / "oos_trade_registry.csv"
+    portfolio_registry_path = output_dir / "portfolio_trade_registry.csv"
     rejection_path = output_dir / "portfolio_rejections.csv"
 
     json_path.write_text(
@@ -192,15 +199,15 @@ def write_portfolio_walk_forward_reports(
         encoding="utf-8",
     )
     text_path.write_text(portfolio_report_to_text(report), encoding="utf-8")
-    _write_trade_registry(report.portfolio.accepted_trades, registry_path)
     _write_trade_registry(report.canonical_candidates, candidate_registry_path)
+    _write_trade_registry(report.portfolio.accepted_trades, portfolio_registry_path)
     _write_rejections(report.portfolio.rejected_trades, rejection_path)
 
     return {
         "json": json_path,
         "txt": text_path,
-        "registry": registry_path,
         "candidate_registry": candidate_registry_path,
+        "portfolio_registry": portfolio_registry_path,
         "rejections": rejection_path,
     }
 
