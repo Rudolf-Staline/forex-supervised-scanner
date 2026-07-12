@@ -9,6 +9,7 @@ import pytest
 from app.backtest.portfolio import (
     PortfolioConstraints,
     currency_exposure,
+    normalized_symbol,
     simulate_portfolio,
     split_symbol,
     trade_currency_exposure,
@@ -115,10 +116,10 @@ def test_position_exiting_at_entry_timestamp_frees_slot() -> None:
     assert not result.rejected_trades
 
 
-def test_same_symbol_overlap_is_rejected() -> None:
+def test_same_symbol_overlap_is_rejected_across_aliases() -> None:
     candidates = [
         _trade("EUR/USD", DirectionBias.LONG, entry_hours=0, exit_hours=3, net_r=0.5, score=90),
-        _trade("EUR/USD", DirectionBias.SHORT, entry_hours=1, exit_hours=2, net_r=0.5, score=80),
+        _trade("EURUSD", DirectionBias.SHORT, entry_hours=1, exit_hours=2, net_r=0.5, score=80),
     ]
     result = simulate_portfolio(
         candidates,
@@ -201,6 +202,7 @@ def test_currency_exposure_helpers_are_directionally_consistent() -> None:
 
     assert split_symbol("EUR/USD") == ("EUR", "USD")
     assert split_symbol("XAUUSD") == ("XAU", "USD")
+    assert normalized_symbol("eur/usd") == "EURUSD"
     assert trade_currency_exposure(long_eurusd) == {"EUR": 1, "USD": -1}
     assert trade_currency_exposure(short_gbpusd) == {"GBP": -1, "USD": 1}
     assert currency_exposure([long_eurusd, short_gbpusd]) == {"EUR": 1, "GBP": -1}
