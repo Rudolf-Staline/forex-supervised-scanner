@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import json
 from datetime import datetime, timedelta, timezone
-
-import csv
 
 from app.backtest.metrics import calculate_metrics
 from app.backtest.walk_forward import (
@@ -16,6 +15,7 @@ from app.backtest.walk_forward import (
     deduplicated_oos_trades,
     evaluate_fold,
     generate_windows,
+    raw_oos_trade_count,
     report_to_dict,
     run_walk_forward,
     select_min_score,
@@ -34,16 +34,24 @@ from app.core.types import (
 BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
-def _trade(net_r: float, score: float, *, day: int) -> TradeRecord:
+def _trade(
+    net_r: float,
+    score: float,
+    *,
+    day: int,
+    symbol: str = "EUR/USD",
+    exit_day: int | None = None,
+) -> TradeRecord:
     moment = BASE + timedelta(days=day)
+    exit_moment = BASE + timedelta(days=exit_day if exit_day is not None else day)
     return TradeRecord(
-        symbol="EUR/USD",
+        symbol=symbol,
         style=TradingStyle.DAY_TRADING,
         setup_family=SetupFamily.TREND_CONTINUATION,
         setup_subtype=SetupSubtype.EMA50_PULLBACK,
         direction=DirectionBias.LONG,
         entry_time=moment,
-        exit_time=moment,
+        exit_time=exit_moment,
         entry=1.1,
         stop_loss=1.095,
         take_profit=1.11,
@@ -62,7 +70,6 @@ def test_generate_windows_are_sequential_and_disjoint_train_test() -> None:
 
     assert len(windows) == 4
     for window in windows:
-        # The out-of-sample segment always follows the in-sample segment.
         assert window.out_of_sample_start == window.in_sample_end
         assert window.out_of_sample_end > window.out_of_sample_start
         assert window.in_sample_end - window.in_sample_start == timedelta(days=30)
@@ -70,7 +77,6 @@ def test_generate_windows_are_sequential_and_disjoint_train_test() -> None:
 
 
 def test_select_min_score_prefers_higher_expectancy_threshold() -> None:
-    # Low scores lose, high scores win: the optimiser should lift the threshold.
     trades = [_trade(-1.0, score=50.0, day=i) for i in range(6)]
     trades += [_trade(2.0, score=80.0, day=10 + i) for i in range(6)]
     selected, expectancy = select_min_score(trades, (0.0, 60.0, 75.0), min_in_sample_trades=5)
@@ -79,7 +85,6 @@ def test_select_min_score_prefers_higher_expectancy_threshold() -> None:
 
 
 def test_select_min_score_respects_minimum_trade_count() -> None:
-    # Only two trades clear 75 -> threshold must fall back to an eligible band.
     trades = [_trade(-1.0, score=50.0, day=i) for i in range(6)]
     trades += [_trade(2.0, score=80.0, day=10 + i) for i in range(2)]
     selected, _ = select_min_score(trades, (0.0, 75.0), min_in_sample_trades=5)
@@ -87,54 +92,38 @@ def test_select_min_score_respects_minimum_trade_count() -> None:
 
 
 def test_evaluate_fold_reports_only_out_of_sample_trades() -> None:
-    config = WalkForwardConfig(in_sample_days=10, out_of_sample_days=5, step_days=5, score_grid=(0.0, 70.0), min_in_sample_trades=3)
+    config = WalkForwardConfig(
+        in_sample_days=10,
+        out_of_sample_days=5,
+        step_days=5,
+        score_grid=(0.0, 70.0),
+        min_in_sample_trades=3,
+    )
     window = generate_windows(BASE, BASE + timedelta(days=15), config)[0]
-    in_sample = [_trade(-1.0, score=50.0, day=i) for i in range(4)] + [_trade(1.5, score=80.0, day=i) for i in range(4)]
+    in_sample = [_trade(-1.0, score=50.0, day=i) for i in range(4)]
+    in_sample += [_trade(1.5, score=80.0, day=5 + i) for i in range(4)]
     out_of_sample = [_trade(0.5, score=80.0, day=11), _trade(-0.4, score=55.0, day=12)]
 
     fold = evaluate_fold(window, in_sample, out_of_sample, config)
 
     assert fold.selected_min_score == 70.0
-    # Only the score>=70 OOS trade survives the in-sample-selected threshold.
     assert fold.out_of_sample_trades == 1
     assert fold.out_of_sample_metrics.expectancy == 0.5
 
 
 def test_run_walk_forward_segments_are_disjoint_at_boundary() -> None:
-    config = WalkForwardConfig(in_sample_days=20, out_of_sample_days=10, step_days=10, score_grid=(0.0,), min_in_sample_trades=1)
+    config = WalkForwardConfig(
+        in_sample_days=20,
+        out_of_sample_days=10,
+        step_days=10,
+        score_grid=(0.0,),
+        min_in_sample_trades=1,
+    )
     calls: list[tuple[str, datetime, datetime]] = []
 
     def runner(symbols, style, setup_filter, start, end):  # noqa: ANN001
         kind = "IS" if (end - start) > timedelta(days=15) else "OOS"
         calls.append((kind, start, end))
-        return BacktestResult(
-            run_id="x", created_at=BASE, symbols=symbols, style=style, setup_filter=setup_filter,
-            start=start, end=end,
-            metrics=__import__("app.backtest.metrics", fromlist=["calculate_metrics"]).calculate_metrics([]),
-            trades=[], equity_curve=[], limitations=[],
-        )
-
-    run_walk_forward(runner, ["EUR/USD"], TradingStyle.DAY_TRADING, "all", BASE, BASE + timedelta(days=60), config)
-
-    # For each fold the IS end must be strictly before the OOS start (no shared bar).
-    is_calls = [c for c in calls if c[0] == "IS"]
-    oos_calls = [c for c in calls if c[0] == "OOS"]
-    assert is_calls and oos_calls
-    for (_, _, is_end), (_, oos_start, _) in zip(is_calls, oos_calls, strict=True):
-        assert is_end < oos_start
-
-
-def test_run_walk_forward_aggregates_oos_only(tmp_path) -> None:
-    config = WalkForwardConfig(in_sample_days=20, out_of_sample_days=10, step_days=10, score_grid=(0.0, 70.0), min_in_sample_trades=3)
-
-    def runner(symbols, style, setup_filter, start, end):  # noqa: ANN001
-        # In-sample segments (length 20d) get a mixed sample favouring high scores;
-        # out-of-sample segments (length 10d) get one winning high-score trade.
-        is_segment = (end - start) > timedelta(days=15)
-        if is_segment:
-            trades = [_trade(-1.0, 50.0, day=0) for _ in range(4)] + [_trade(1.2, 80.0, day=1) for _ in range(4)]
-        else:
-            trades = [_trade(0.8, 80.0, day=0), _trade(-0.5, 55.0, day=1)]
         return BacktestResult(
             run_id="x",
             created_at=BASE,
@@ -143,16 +132,74 @@ def test_run_walk_forward_aggregates_oos_only(tmp_path) -> None:
             setup_filter=setup_filter,
             start=start,
             end=end,
-            metrics=__import__("app.backtest.metrics", fromlist=["calculate_metrics"]).calculate_metrics(trades),
+            metrics=calculate_metrics([]),
+            trades=[],
+            equity_curve=[],
+            limitations=[],
+        )
+
+    run_walk_forward(
+        runner,
+        ["EUR/USD"],
+        TradingStyle.DAY_TRADING,
+        "all",
+        BASE,
+        BASE + timedelta(days=60),
+        config,
+    )
+
+    is_calls = [call for call in calls if call[0] == "IS"]
+    oos_calls = [call for call in calls if call[0] == "OOS"]
+    assert is_calls and oos_calls
+    for (_, _, is_end), (_, oos_start, _) in zip(is_calls, oos_calls, strict=True):
+        assert is_end < oos_start
+
+
+def test_run_walk_forward_aggregates_unique_oos_only(tmp_path) -> None:
+    config = WalkForwardConfig(
+        in_sample_days=20,
+        out_of_sample_days=10,
+        step_days=10,
+        score_grid=(0.0, 70.0),
+        min_in_sample_trades=3,
+    )
+
+    def runner(symbols, style, setup_filter, start, end):  # noqa: ANN001
+        is_segment = (end - start) > timedelta(days=15)
+        segment_day = (start - BASE).days
+        if is_segment:
+            trades = [_trade(-1.0, 50.0, day=segment_day + i) for i in range(4)]
+            trades += [_trade(1.2, 80.0, day=segment_day + 5 + i) for i in range(4)]
+        else:
+            trades = [
+                _trade(0.8, 80.0, day=segment_day),
+                _trade(-0.5, 55.0, day=segment_day + 1),
+            ]
+        return BacktestResult(
+            run_id="x",
+            created_at=BASE,
+            symbols=symbols,
+            style=style,
+            setup_filter=setup_filter,
+            start=start,
+            end=end,
+            metrics=calculate_metrics(trades),
             trades=trades,
             equity_curve=[],
             limitations=[],
         )
 
-    report = run_walk_forward(runner, ["EUR/USD"], TradingStyle.DAY_TRADING, "all", BASE, BASE + timedelta(days=60), config)
+    report = run_walk_forward(
+        runner,
+        ["EUR/USD"],
+        TradingStyle.DAY_TRADING,
+        "all",
+        BASE,
+        BASE + timedelta(days=60),
+        config,
+    )
 
     assert len(report.folds) >= 2
-    # Every fold tuned to 70 and kept only the high-score OOS winner.
     for fold in report.folds:
         assert fold.selected_min_score == 70.0
         assert fold.out_of_sample_trades == 1
@@ -162,15 +209,15 @@ def test_run_walk_forward_aggregates_oos_only(tmp_path) -> None:
     outputs = write_reports(report, tmp_path)
     payload = json.loads(outputs["json"].read_text())
     assert payload["out_of_sample"]["total_trades"] == len(report.folds)
+    assert payload["out_of_sample"]["duplicates_removed"] == 0
     assert outputs["txt"].read_text().startswith("Walk-Forward")
-    # Sanity: serialisation round-trips the fold count.
     assert report_to_dict(report)["fold_count"] == len(report.folds)
 
 
-def _window(idx: int, day: int) -> WalkForwardWindow:
+def _window(index: int, day: int) -> WalkForwardWindow:
     base = BASE + timedelta(days=day)
     return WalkForwardWindow(
-        fold_index=idx,
+        fold_index=index,
         in_sample_start=base,
         in_sample_end=base + timedelta(days=45),
         out_of_sample_start=base + timedelta(days=45),
@@ -178,9 +225,9 @@ def _window(idx: int, day: int) -> WalkForwardWindow:
     )
 
 
-def _fold(idx: int, day: int, trades) -> FoldResult:
+def _fold(index: int, day: int, trades: list[TradeRecord]) -> FoldResult:
     return FoldResult(
-        window=_window(idx, day),
+        window=_window(index, day),
         selected_min_score=60.0,
         in_sample_trades=len(trades),
         in_sample_expectancy=0.0,
@@ -190,39 +237,96 @@ def _fold(idx: int, day: int, trades) -> FoldResult:
     )
 
 
-def _report(folds) -> WalkForwardReport:
+def _report(folds: list[FoldResult]) -> WalkForwardReport:
     return WalkForwardReport(
         config=WalkForwardConfig(in_sample_days=45, out_of_sample_days=21, step_days=14),
-        symbols=["EUR/USD"], style=TradingStyle.DAY_TRADING, setup_filter="all",
-        start=BASE, end=BASE + timedelta(days=120), folds=folds,
-        aggregate_metrics=calculate_metrics([]), oos_equity_curve=[],
+        symbols=["EUR/USD"],
+        style=TradingStyle.DAY_TRADING,
+        setup_filter="all",
+        start=BASE,
+        end=BASE + timedelta(days=120),
+        folds=folds,
+        aggregate_metrics=calculate_metrics([]),
+        oos_equity_curve=[],
     )
 
 
 def test_deduplicated_oos_trades_removes_overlap_duplicates() -> None:
-    a = _trade(1.0, 70.0, day=10)
-    b = _trade(-1.0, 65.0, day=20)   # appears in BOTH folds (7-day overlap)
-    c = _trade(0.5, 72.0, day=30)
-    report = _report([_fold(0, 0, [a, b]), _fold(1, 14, [b, c])])
+    first = _trade(1.0, 70.0, day=10)
+    duplicate = _trade(-1.0, 65.0, day=20)
+    last = _trade(0.5, 72.0, day=30)
+    report = _report([_fold(0, 0, [first, duplicate]), _fold(1, 14, [duplicate, last])])
 
     unique = deduplicated_oos_trades(report)
-    # b counted once -> 3 unique, not 4.
     assert len(unique) == 3
-    keys = {(t.symbol, t.entry_time) for t in unique}
-    assert len(keys) == 3
+    assert len({(trade.symbol, trade.entry_time) for trade in unique}) == 3
+
+
+def test_primary_aggregate_metrics_and_equity_use_deduplicated_sample() -> None:
+    config = WalkForwardConfig(
+        in_sample_days=10,
+        out_of_sample_days=10,
+        step_days=5,
+        score_grid=(0.0,),
+        min_in_sample_trades=1,
+    )
+    shared = _trade(-1.0, 70.0, day=17, exit_day=18)
+
+    def runner(symbols, style, setup_filter, start, end):  # noqa: ANN001
+        is_segment = (end - start) > timedelta(days=9, hours=23)
+        if is_segment:
+            trades = [_trade(0.1, 70.0, day=(start - BASE).days)]
+        else:
+            fold_start = (start - BASE).days
+            trades = [shared]
+            if fold_start == 10:
+                trades.append(_trade(1.0, 70.0, day=11, exit_day=12))
+            elif fold_start == 15:
+                trades.append(_trade(0.5, 70.0, day=22, exit_day=23))
+        return BacktestResult(
+            run_id="x",
+            created_at=BASE,
+            symbols=symbols,
+            style=style,
+            setup_filter=setup_filter,
+            start=start,
+            end=end,
+            metrics=calculate_metrics(trades),
+            trades=trades,
+            equity_curve=[],
+            limitations=[],
+        )
+
+    report = run_walk_forward(
+        runner,
+        ["EUR/USD"],
+        TradingStyle.DAY_TRADING,
+        "all",
+        BASE,
+        BASE + timedelta(days=30),
+        config,
+    )
+
+    assert raw_oos_trade_count(report) == 4
+    assert report.aggregate_metrics.number_of_trades == 3
+    assert report.aggregate_metrics.expectancy == round((1.0 - 1.0 + 0.5) / 3, 4)
+    assert len(report.oos_equity_curve) == 4  # origin + three unique trades
+    payload = report_to_dict(report)["out_of_sample"]
+    assert payload["raw_fold_trade_records"] == 4
+    assert payload["duplicates_removed"] == 1
 
 
 def test_write_oos_registry_schema_and_dedup(tmp_path) -> None:
-    a = _trade(1.0, 70.0, day=10)
-    b = _trade(-1.0, 65.0, day=20)
-    report = _report([_fold(0, 0, [a, b]), _fold(1, 14, [b])])
+    first = _trade(1.0, 70.0, day=10)
+    duplicate = _trade(-1.0, 65.0, day=20)
+    report = _report([_fold(0, 0, [first, duplicate]), _fold(1, 14, [duplicate])])
 
     path = write_oos_registry(report, tmp_path / "oos_trade_registry.csv")
     with path.open() as handle:
         rows = list(csv.DictReader(handle))
-    assert [c for c in rows[0].keys()] == ["pair", "timestamp", "score", "gross_r", "net_r", "exit_reason"]
-    assert len(rows) == 2  # b deduplicated
-    assert {r["pair"] for r in rows} == {"EUR/USD"}
+    assert list(rows[0].keys()) == ["pair", "timestamp", "score", "gross_r", "net_r", "exit_reason"]
+    assert len(rows) == 2
+    assert {row["pair"] for row in rows} == {"EUR/USD"}
 
 
 def test_write_reports_includes_registry(tmp_path) -> None:
