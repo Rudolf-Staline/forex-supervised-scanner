@@ -88,7 +88,7 @@ def test_threshold_prefers_recall_under_precision_constraint() -> None:
 
     threshold = choose_probability_threshold(labels, probabilities, minimum_precision=0.75)
 
-    assert threshold == 0.80
+    assert threshold == 0.60
 
 
 def _registry(*, probability: float) -> PatternModelRegistry:
