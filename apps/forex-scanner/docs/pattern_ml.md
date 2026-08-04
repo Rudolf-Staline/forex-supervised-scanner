@@ -11,6 +11,8 @@ models/patterns/
   double_top/
     metadata.json
     model.joblib
+    training_report.json
+    weak_labels.csv
   double_bottom/
     metadata.json
     model.joblib
@@ -62,34 +64,95 @@ A broken model is isolated and reported in `result.failures`; it does not preven
 
 The transformer is causal: it only reads the requested trailing window. Training and inference must use the same schema and window size.
 
-## Integration rule
+## Disabled-by-default integration
 
-ML output is confluence evidence only. It may enrich `RawSetup.detected_patterns`, `pattern_score`, and explanations after explicit scanner wiring, but it must not:
+The current scanner remains unchanged unless the optional wrapper is called with a registry and a non-disabled mode:
+
+```python
+from app.pattern_ml import PatternMLMode, detect_setups_with_optional_pattern_ml
+
+result = detect_setups_with_optional_pattern_ml(
+    pattern_ml_registry=registry,
+    pattern_ml_mode=PatternMLMode.REPORT_ONLY,
+    symbol=symbol,
+    style=style,
+    higher_df=higher_df,
+    entry_df=entry_df,
+    trigger_df=trigger_df,
+    higher_regime=higher_regime,
+    entry_regime=entry_regime,
+    trigger_regime=trigger_regime,
+    levels=levels,
+    settings=settings,
+)
+raw_setups = result.setups
+```
+
+Modes:
+
+- `disabled`: no inference and no behavioral change;
+- `report_only`: attach `ml_*` evidence and diagnostics, but keep the pattern score unchanged;
+- `confluence`: add a bounded fraction of the normal pattern score, still capped at 15.
+
+The scanner's final score adds only `pattern_score * 0.2`, so even a fully saturated pattern score contributes at most three final-score points. The default confluence weight is `0.35`, and `report_only` is the intended first deployment mode.
+
+ML output must not:
 
 - create a trade when no rules-based setup exists;
 - set stop-loss or take-profit values;
 - directly change execution mode;
 - authorize live trading or broker order submission.
 
-Initial deployment should use the models as confirmation or contradiction evidence. Their weight in final scoring must remain bounded and validated out of sample.
+## First training pipeline: double top
 
-## Validation requirements
+Install the optional ML dependencies:
+
+```bash
+cd apps/forex-scanner
+python -m pip install -e ".[ml]"
+```
+
+Train the first candidate from local historical CSV files:
+
+```bash
+python scripts/train_pattern_model.py \
+  --input data/real/EURUSD_M15.csv data/real/GBPUSD_M15.csv data/real/USDJPY_M15.csv \
+  --pattern double_top \
+  --window-size 64 \
+  --stride 2 \
+  --minimum-precision 0.75 \
+  --model-version double-top-v1 \
+  --output-dir models/patterns/double_top
+```
+
+The command writes:
+
+- `model.joblib`: the fitted estimator;
+- `metadata.json`: inference contract and locked validation threshold;
+- `training_report.json`: temporal split metrics and model hash;
+- `weak_labels.csv`: all retained samples with empty `human_label` and `review_status` columns.
+
+The current rules detector creates causal weak labels. These are bootstrap labels, not ground truth. Before the model influences scoring, review positives and hard negatives in `weak_labels.csv`, replace disputed labels, then retrain from the reviewed dataset in a later pipeline revision.
+
+## Temporal validation
+
+Each input CSV is split chronologically into train, validation, and test partitions. An embargo equal to `window_size - 1` samples is applied around boundaries by default, preventing almost-identical overlapping windows from crossing partitions.
+
+The decision threshold is selected only on validation data. The test partition remains untouched until final evaluation. Random row-level cross-validation is forbidden because neighboring windows share most of their candles.
 
 Before registering a production candidate model, record at least:
 
 - temporal train/validation/test boundaries;
 - labeling rules and ambiguous-sample policy;
-- per-pattern precision, recall, PR-AUC, calibration, and false-positive rate;
+- precision, recall, PR-AUC, calibration, and false-positive rate;
 - performance by symbol, timeframe, session, and volatility regime;
 - threshold chosen only from validation data;
 - locked out-of-sample and walk-forward results;
 - model and dataset hashes.
 
-Random row-level cross-validation is not acceptable for overlapping market windows because it leaks nearly identical neighboring samples across folds.
-
 ## Tests
 
 ```bash
 cd apps/forex-scanner
-python -m pytest tests/test_pattern_ml.py
+python -m pytest tests/test_pattern_ml.py tests/test_pattern_ml_integration.py
 ```
